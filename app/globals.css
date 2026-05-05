@@ -20,7 +20,27 @@
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+@utility input {
+  @apply w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm
+         shadow-sm outline-none transition
+         focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10
+         dark:border-zinc-700 dark:bg-zinc-900
+         dark:focus:border-zinc-100 dark:focus:ring-zinc-100/10;
+}
+
+@utility btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-md bg-zinc-900
+         px-4 py-2 text-sm font-medium text-white
+         transition hover:bg-zinc-700 disabled:opacity-50
+         dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300;
+}
+
+@utility btn-secondary {
+  @apply inline-flex items-center justify-center gap-2 rounded-md border
+         border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900
+         transition hover:bg-zinc-100
+         dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800;
 }
