@@ -5,7 +5,8 @@ import { summarizeDay } from '@/lib/payroll'
 import { addShift, setDailySheetStatus, deleteDailySheet } from '../actions'
 import { ShiftRows } from './ShiftRows'
 import { AddShiftForm } from './AddShiftForm'
-import type { DailySheet, Shift, Employee, PayPeriod } from '@/lib/types/db'
+import { AlcoholSection } from './AlcoholSection'
+import type { DailySheet, Shift, Employee, PayPeriod, AlcoholSale } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,27 +14,28 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
   const { id } = await params
   const supabase = getSupabaseAdmin()
 
-  const [{ data: sheetRow, error: sheetErr }, { data: shiftsRow }, { data: employeesRow }, { data: periodRow }] =
-    await Promise.all([
-      supabase.from('daily_sheets').select('*').eq('id', id).maybeSingle(),
-      supabase
-        .from('shifts')
-        .select('*')
-        .eq('daily_sheet_id', id)
-        .order('start_time', { ascending: true, nullsFirst: false }),
-      supabase
-        .from('employees')
-        .select('*')
-        .eq('active', true)
-        .order('full_name', { ascending: true }),
-      supabase
-        .from('pay_periods')
-        .select('*')
-        .lte('start_date', '9999-12-31') // dummy; refined below
-        .limit(1)
-        .maybeSingle(),
-    ])
-  void periodRow // not actually used; we'll fetch correctly below
+  const [
+    { data: sheetRow, error: sheetErr },
+    { data: shiftsRow },
+    { data: employeesRow },
+    { data: alcoholRow },
+  ] = await Promise.all([
+    supabase.from('daily_sheets').select('*').eq('id', id).maybeSingle(),
+    supabase
+      .from('shifts')
+      .select('*')
+      .eq('daily_sheet_id', id)
+      .order('start_time', { ascending: true, nullsFirst: false }),
+    supabase
+      .from('employees')
+      .select('*')
+      .eq('active', true)
+      .order('full_name', { ascending: true }),
+    supabase
+      .from('alcohol_sales')
+      .select('*')
+      .eq('daily_sheet_id', id),
+  ])
 
   if (sheetErr) throw new Error(sheetErr.message)
   if (!sheetRow) notFound()
@@ -41,6 +43,7 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
   const sheet = sheetRow as DailySheet
   const shifts = (shiftsRow ?? []) as Shift[]
   const employees = (employeesRow ?? []) as Employee[]
+  const alcoholSales = (alcoholRow ?? []) as AlcoholSale[]
 
   // Resolve enclosing pay period if any (for the header link).
   let period: PayPeriod | null = null
@@ -106,6 +109,14 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
           <ShiftRows shifts={shifts} sheetId={sheet.id} employees={employees} readOnly={sheet.status === 'approved'} />
         )}
       </section>
+
+      <AlcoholSection
+        sheetId={sheet.id}
+        shifts={shifts}
+        alcoholSales={alcoholSales}
+        employees={employees}
+        readOnly={sheet.status === 'approved'}
+      />
     </div>
   )
 }

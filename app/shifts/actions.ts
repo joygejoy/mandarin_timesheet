@@ -152,3 +152,88 @@ export async function deleteDailySheet(id: string) {
   revalidatePath('/shifts')
   redirect('/shifts')
 }
+
+// ---- Alcohol sales --------------------------------------------------------
+
+const AlcoholInput = z.object({
+  daily_sheet_id: z.string().uuid(),
+  employee_id: z.string().uuid().nullable(),
+  employee_name: z.string().trim().min(1).max(120),
+  drink_points: z.coerce.number().int().min(0).max(9999),
+  notes: z.string().trim().max(500).nullable().optional(),
+})
+
+export type AlcoholInput = z.input<typeof AlcoholInput>
+
+/**
+ * Upsert a per-day alcohol points row. Setting points=0 deletes the row.
+ * Keyed on (daily_sheet_id, employee_id); for ad-hoc names with no
+ * employee_id, we match by name to update in place.
+ */
+export async function setAlcoholPoints(input: AlcoholInput) {
+  const data = AlcoholInput.parse(input)
+  const supabase = getSupabaseAdmin()
+
+  if (data.drink_points === 0) {
+    // Delete any existing row for this employee on this sheet.
+    let q = supabase.from('alcohol_sales').delete().eq('daily_sheet_id', data.daily_sheet_id)
+    if (data.employee_id) {
+      q = q.eq('employee_id', data.employee_id)
+    } else {
+      q = q.is('employee_id', null).eq('employee_name_snapshot', data.employee_name)
+    }
+    const { error } = await q
+    if (error) throw new Error(error.message)
+    revalidatePath(`/shifts/${data.daily_sheet_id}`)
+    return
+  }
+
+  if (data.employee_id) {
+    const { error } = await supabase
+      .from('alcohol_sales')
+      .upsert(
+        {
+          daily_sheet_id: data.daily_sheet_id,
+          employee_id: data.employee_id,
+          employee_name_snapshot: data.employee_name,
+          drink_points: data.drink_points,
+          notes: data.notes ?? null,
+        },
+        { onConflict: 'daily_sheet_id,employee_id' }
+      )
+    if (error) throw new Error(error.message)
+  } else {
+    // No employee_id; check if a row already exists by name for this sheet.
+    const { data: existing } = await supabase
+      .from('alcohol_sales')
+      .select('id')
+      .eq('daily_sheet_id', data.daily_sheet_id)
+      .is('employee_id', null)
+      .eq('employee_name_snapshot', data.employee_name)
+      .maybeSingle()
+    if (existing) {
+      const { error } = await supabase
+        .from('alcohol_sales')
+        .update({ drink_points: data.drink_points, notes: data.notes ?? null })
+        .eq('id', existing.id)
+      if (error) throw new Error(error.message)
+    } else {
+      const { error } = await supabase.from('alcohol_sales').insert({
+        daily_sheet_id: data.daily_sheet_id,
+        employee_id: null,
+        employee_name_snapshot: data.employee_name,
+        drink_points: data.drink_points,
+        notes: data.notes ?? null,
+      })
+      if (error) throw new Error(error.message)
+    }
+  }
+  revalidatePath(`/shifts/${data.daily_sheet_id}`)
+}
+
+export async function deleteAlcoholSale(id: string, sheetId: string) {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase.from('alcohol_sales').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+  revalidatePath(`/shifts/${sheetId}`)
+}
