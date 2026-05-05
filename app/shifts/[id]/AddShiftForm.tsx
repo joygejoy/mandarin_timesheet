@@ -1,0 +1,190 @@
+'use client'
+
+import { useMemo, useRef, useState, useTransition } from 'react'
+import type { Employee } from '@/lib/types/db'
+
+const OTHER = '__other__'
+
+export function AddShiftForm({
+  dailySheetId,
+  employees,
+  addShift,
+}: {
+  dailySheetId: string
+  employees: Employee[]
+  addShift: (formData: FormData) => Promise<void>
+}) {
+  const formRef = useRef<HTMLFormElement>(null)
+  const [employeeId, setEmployeeId] = useState<string>(employees[0]?.id ?? OTHER)
+  const [name, setName] = useState<string>(employees[0]?.full_name ?? '')
+  const [rate, setRate] = useState<number>(employees[0]?.hourly_rate ?? 17.5)
+  const [role, setRole] = useState<string>(employees[0]?.role ?? '')
+  const [breakMin, setBreakMin] = useState<number>(employees[0]?.default_break_minutes ?? 0)
+  const [meal, setMeal] = useState<boolean>(employees[0]?.default_meal_provided ?? false)
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const employeeMap = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees])
+
+  function onSelectEmployee(id: string) {
+    setEmployeeId(id)
+    if (id === OTHER) {
+      setName('')
+      setRate(17.5)
+      setRole('')
+      setBreakMin(0)
+      setMeal(false)
+    } else {
+      const e = employeeMap.get(id)
+      if (e) {
+        setName(e.full_name)
+        setRate(e.hourly_rate)
+        setRole(e.role ?? '')
+        setBreakMin(e.default_break_minutes)
+        setMeal(e.default_meal_provided)
+      }
+    }
+  }
+
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setError(null)
+    const fd = new FormData(e.currentTarget)
+    // Replace the select with the resolved id (or null) and inject snapshot fields.
+    fd.set('daily_sheet_id', dailySheetId)
+    fd.set('employee_id', employeeId === OTHER ? '' : employeeId)
+    fd.set('employee_name', name)
+    fd.set('hourly_rate', rate.toString())
+    if (meal) fd.set('meal_provided', 'on')
+    else fd.delete('meal_provided')
+
+    startTransition(async () => {
+      try {
+        await addShift(fd)
+        // Reset times/section/notes only; keep employee selection for repeated entries.
+        const f = formRef.current
+        if (f) {
+          ;(f.elements.namedItem('start_time') as HTMLInputElement).value = ''
+          ;(f.elements.namedItem('end_time') as HTMLInputElement).value = ''
+          ;(f.elements.namedItem('section') as HTMLInputElement).value = ''
+          ;(f.elements.namedItem('notes') as HTMLInputElement).value = ''
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to add shift')
+      }
+    })
+  }
+
+  return (
+    <form
+      ref={formRef}
+      onSubmit={onSubmit}
+      className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+    >
+      <div className="grid gap-3 sm:grid-cols-6">
+        <div className="sm:col-span-2">
+          <label className="block text-xs text-zinc-500">Employee</label>
+          <select
+            value={employeeId}
+            onChange={(e) => onSelectEmployee(e.target.value)}
+            className="input mt-1"
+          >
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.full_name}
+              </option>
+            ))}
+            <option value={OTHER}>— Other (type name) —</option>
+          </select>
+        </div>
+
+        {employeeId === OTHER && (
+          <div className="sm:col-span-2">
+            <label className="block text-xs text-zinc-500">Name</label>
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="input mt-1"
+            />
+          </div>
+        )}
+
+        <div>
+          <label className="block text-xs text-zinc-500">Section</label>
+          <input name="section" className="input mt-1" maxLength={20} placeholder="A" />
+        </div>
+
+        <div>
+          <label className="block text-xs text-zinc-500">Role</label>
+          <input
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className="input mt-1"
+            maxLength={60}
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs text-zinc-500">Start (HH:MM)</label>
+          <input
+            name="start_time"
+            type="time"
+            className="input mt-1"
+            placeholder="16:30"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-zinc-500">End (HH:MM)</label>
+          <input name="end_time" type="time" className="input mt-1" placeholder="22:00" />
+        </div>
+        <div>
+          <label className="block text-xs text-zinc-500">Break (min)</label>
+          <input
+            type="number"
+            min="0"
+            value={breakMin}
+            onChange={(e) => setBreakMin(Number(e.target.value))}
+            className="input mt-1"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-zinc-500">Rate ($)</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={rate}
+            onChange={(e) => setRate(Number(e.target.value))}
+            className="input mt-1"
+          />
+        </div>
+        <div className="flex items-end">
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={meal}
+              onChange={(e) => setMeal(e.target.checked)}
+            />
+            Meal
+          </label>
+        </div>
+
+        <div className="sm:col-span-4">
+          <label className="block text-xs text-zinc-500">Notes</label>
+          <input name="notes" className="input mt-1" maxLength={500} />
+        </div>
+
+        <div className="flex items-end justify-end sm:col-span-2">
+          <button type="submit" className="btn-primary" disabled={pending}>
+            {pending ? 'Adding…' : 'Add shift'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>
+      )}
+    </form>
+  )
+}
