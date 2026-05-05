@@ -75,3 +75,14 @@ export async function toggleEmployeeActive(id: string, active: boolean) {
   if (error) throw new Error(error.message)
   revalidatePath('/employees')
 }
+
+/**
+ * Hard-delete an employee. Their historical shifts/alcohol sales survive
+ * (employee_id is set to null but the name snapshot stays).
+ */
+export async function deleteEmployee(id: string) {
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase.from('employees').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+  revalidatePath('/employees')
+}

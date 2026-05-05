@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { SetupRequired } from '@/app/_components/SetupRequired'
-import { toggleEmployeeActive } from './actions'
+import { deleteEmployee, toggleEmployeeActive } from './actions'
+import { DeleteButton } from './DeleteButton'
 import type { Employee } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -15,13 +16,18 @@ export default async function EmployeesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Employees</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Default rate is $17.50. Inactive employees stay in past payroll snapshots.
+            Default rate is $17.50. Inactive employees stay in past payroll snapshots; deleted ones do too (their shifts keep the name).
           </p>
         </div>
         {configured && (
-          <Link href="/employees/new" className="btn-primary">
-            Add employee
-          </Link>
+          <div className="flex gap-2">
+            <Link href="/employees/import" className="btn-secondary">
+              Import from sheet
+            </Link>
+            <Link href="/employees/new" className="btn-primary">
+              Add employee
+            </Link>
+          </div>
         )}
       </header>
 
@@ -88,7 +94,10 @@ function EmployeeTable({ rows }: { rows: Employee[] }) {
                 </span>
               </td>
               <td className="px-4 py-3 text-right">
-                <ToggleActiveForm id={r.id} active={r.active} />
+                <div className="flex justify-end gap-3">
+                  <ToggleActiveForm id={r.id} active={r.active} />
+                  <DeleteForm id={r.id} name={r.full_name} />
+                </div>
               </td>
             </tr>
           ))}
@@ -110,6 +119,14 @@ function ToggleActiveForm({ id, active }: { id: string; active: boolean }) {
       </button>
     </form>
   )
+}
+
+function DeleteForm({ id, name }: { id: string; name: string }) {
+  async function action() {
+    'use server'
+    await deleteEmployee(id)
+  }
+  return <DeleteButton action={action} name={name} />
 }
 
 function EmptyState() {
