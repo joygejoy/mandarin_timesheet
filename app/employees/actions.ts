@@ -86,3 +86,17 @@ export async function deleteEmployee(id: string) {
   if (error) throw new Error(error.message)
   revalidatePath('/employees')
 }
+
+/** Inline rate update from the list. */
+export async function updateEmployeeRate(id: string, hourly_rate: number) {
+  if (!Number.isFinite(hourly_rate) || hourly_rate < 0 || hourly_rate > 999) {
+    throw new Error('Rate must be between 0 and 999.')
+  }
+  const supabase = getSupabaseAdmin()
+  const { error } = await supabase
+    .from('employees')
+    .update({ hourly_rate })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+  revalidatePath('/employees')
+}

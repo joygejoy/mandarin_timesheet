@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { SetupRequired } from '@/app/_components/SetupRequired'
-import { deleteEmployee, toggleEmployeeActive } from './actions'
+import { deleteEmployee, toggleEmployeeActive, updateEmployeeRate } from './actions'
 import { DeleteButton } from './DeleteButton'
+import { RateEditor } from './RateEditor'
 import type { Employee } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -74,7 +75,9 @@ function EmployeeTable({ rows }: { rows: Employee[] }) {
                 </Link>
               </td>
               <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{r.role ?? '—'}</td>
-              <td className="px-4 py-3 text-right tabular-nums">${r.hourly_rate.toFixed(2)}</td>
+              <td className="px-4 py-3 text-right">
+                <RateEditor id={r.id} initialRate={r.hourly_rate} action={updateEmployeeRate} />
+              </td>
               <td className="px-4 py-3 text-right tabular-nums">{r.age ?? '—'}</td>
               <td className="px-4 py-3 text-right tabular-nums">
                 {r.default_break_minutes}m
