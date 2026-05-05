@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { getSupabaseServer } from '@/lib/supabase/server'
+import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { updateEmployee } from '../actions'
 import { EmployeeForm } from '../EmployeeForm'
 import type { Employee } from '@/lib/types/db'
@@ -13,7 +13,7 @@ export default async function EditEmployeePage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const supabase = await getSupabaseServer()
+  const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from('employees')
     .select('*')

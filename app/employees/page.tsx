@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { getSupabaseServer, isSupabaseConfigured } from '@/lib/supabase/server'
+import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { SetupRequired } from '@/app/_components/SetupRequired'
 import { toggleEmployeeActive } from './actions'
 import type { Employee } from '@/lib/types/db'
@@ -31,7 +31,7 @@ export default async function EmployeesPage() {
 }
 
 async function EmployeeList() {
-  const supabase = await getSupabaseServer()
+  const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from('employees')
     .select('*')

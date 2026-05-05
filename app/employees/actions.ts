@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
-import { getSupabaseServer } from '@/lib/supabase/server'
+import { getSupabaseAdmin } from '@/lib/supabase/server'
 
 const EmployeeInput = z.object({
   full_name: z.string().trim().min(1, 'Name required').max(120),
@@ -32,7 +32,7 @@ function clean(v: string | number | undefined | '') {
 
 export async function createEmployee(formData: FormData) {
   const data = parse(formData)
-  const supabase = await getSupabaseServer()
+  const supabase = getSupabaseAdmin()
   const { error } = await supabase.from('employees').insert({
     full_name: data.full_name,
     role: clean(data.role),
@@ -50,7 +50,7 @@ export async function createEmployee(formData: FormData) {
 
 export async function updateEmployee(id: string, formData: FormData) {
   const data = parse(formData)
-  const supabase = await getSupabaseServer()
+  const supabase = getSupabaseAdmin()
   const { error } = await supabase
     .from('employees')
     .update({
@@ -70,7 +70,7 @@ export async function updateEmployee(id: string, formData: FormData) {
 }
 
 export async function toggleEmployeeActive(id: string, active: boolean) {
-  const supabase = await getSupabaseServer()
+  const supabase = getSupabaseAdmin()
   const { error } = await supabase.from('employees').update({ active }).eq('id', id)
   if (error) throw new Error(error.message)
   revalidatePath('/employees')
