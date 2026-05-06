@@ -6,6 +6,33 @@ import Link from 'next/link'
 import { approveScannedSheet, type ApproveInputType } from './actions'
 import type { Employee } from '@/lib/types/db'
 
+/**
+ * Downscale an image client-side so the OpenAI vision request is small
+ * enough to upload reliably. Scales the longest side to maxLongSide,
+ * encodes JPEG at the given quality. Returns a Blob suitable for FormData.
+ */
+async function downscaleImage(file: File, maxLongSide: number, quality: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(file)
+  const long = Math.max(bitmap.width, bitmap.height)
+  const scale = long > maxLongSide ? maxLongSide / long : 1
+  const w = Math.round(bitmap.width * scale)
+  const h = Math.round(bitmap.height * scale)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('No 2d context')
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  bitmap.close()
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('canvas.toBlob failed'))),
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
 const OTHER = '__other__'
 
 type Candidate = {
@@ -88,8 +115,17 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setError(null)
     setStep('extracting')
 
+    // Downscale before upload so OpenAI doesn't drop the connection.
+    let uploadBlob: Blob = file
+    try {
+      uploadBlob = await downscaleImage(file, 2000, 0.85)
+    } catch {
+      // Fall back to the original file if canvas resize fails.
+    }
+
     const fd = new FormData()
-    fd.append('file', file)
+    const filename = file.name.replace(/\.[^.]+$/, '') + '.jpg'
+    fd.append('file', uploadBlob, filename)
     let res: Response
     try {
       res = await fetch('/api/shifts/extract', { method: 'POST', body: fd })
