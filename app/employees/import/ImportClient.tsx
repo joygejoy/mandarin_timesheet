@@ -5,6 +5,28 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { bulkImportEmployees, type BulkImportResult } from './actions'
 
+async function downscaleImage(file: File, maxLongSide: number, quality: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(file)
+  const long = Math.max(bitmap.width, bitmap.height)
+  const scale = long > maxLongSide ? maxLongSide / long : 1
+  const w = Math.round(bitmap.width * scale)
+  const h = Math.round(bitmap.height * scale)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('No 2d context')
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  bitmap.close()
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('canvas.toBlob failed'))),
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
 type Candidate = {
   id: string                    // local-only client id
   include: boolean
@@ -38,12 +60,26 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
 
   async function onFileChosen(file: File) {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
-    setPreviewUrl(URL.createObjectURL(file))
+    const isImage = file.type.startsWith('image/')
+    setPreviewUrl(isImage ? URL.createObjectURL(file) : null)
     setError(null)
     setStep('extracting')
 
+    // Downscale images before upload so OpenAI doesn't drop the connection
+    // on multi-megabyte phone photos. Non-images (CSV, text) go through as-is.
+    let uploadBlob: Blob = file
+    let uploadName = file.name
+    if (isImage) {
+      try {
+        uploadBlob = await downscaleImage(file, 2000, 0.85)
+        uploadName = file.name.replace(/\.[^.]+$/, '') + '.jpg'
+      } catch {
+        // Fall back to the original file if canvas resize fails.
+      }
+    }
+
     const fd = new FormData()
-    fd.append('file', file)
+    fd.append('file', uploadBlob, uploadName)
     let res: Response
     try {
       res = await fetch('/api/employees/extract', { method: 'POST', body: fd })
@@ -198,8 +234,7 @@ function UploadCard({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
-          capture="environment"
+          accept="image/*,text/csv,text/plain,text/tab-separated-values,.csv,.tsv,.txt"
           disabled={step === 'extracting' || step === 'saving'}
           className="mt-3 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-700 dark:file:bg-zinc-100 dark:file:text-zinc-900 dark:hover:file:bg-zinc-300"
           onChange={(e) => {
@@ -208,7 +243,8 @@ function UploadCard({
           }}
         />
         <p className="mt-3 text-xs text-zinc-500">
-          On mobile this opens your camera. JPG/PNG/HEIC up to 8 MB.
+          Image (JPG/PNG/HEIC) → GPT-4o vision · CSV / TSV / TXT → parsed directly (no OCR cost).
+          For PDF or Excel, export to CSV first. Up to 10 MB.
         </p>
         {step === 'extracting' && (
           <p className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
@@ -222,8 +258,8 @@ function UploadCard({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={previewUrl} alt="Sheet preview" className="max-h-80 w-full rounded object-contain" />
         ) : (
-          <div className="flex h-full min-h-40 items-center justify-center text-xs text-zinc-400">
-            Preview appears here
+          <div className="flex h-full min-h-40 items-center justify-center px-3 text-center text-xs text-zinc-400">
+            Image preview appears here. Text files don’t preview — names show up below.
           </div>
         )}
       </div>
