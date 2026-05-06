@@ -52,7 +52,23 @@ export async function POST(request: NextRequest) {
     if (err instanceof OpenAINotConfiguredError) {
       return NextResponse.json({ error: err.message }, { status: 503 })
     }
-    const message = err instanceof Error ? err.message : 'Unknown OpenAI error'
-    return NextResponse.json({ error: message }, { status: 502 })
+    const e = err as { status?: number; code?: string; message?: string }
+    const status = typeof e.status === 'number' ? e.status : 502
+    const message = friendlyOpenAIError(e)
+    console.error('[scan/extract] OpenAI error:', e)
+    return NextResponse.json({ error: message, code: e.code }, { status })
   }
+}
+
+function friendlyOpenAIError(e: { code?: string; message?: string; status?: number }): string {
+  if (e.code === 'insufficient_quota') {
+    return 'Your OpenAI account has no credits. Add a payment method and at least $5 in credits at https://platform.openai.com/settings/organization/billing.'
+  }
+  if (e.code === 'invalid_api_key' || e.status === 401) {
+    return 'OpenAI rejected the API key. Check OPENAI_API_KEY in .env.local and restart the dev server.'
+  }
+  if (e.status === 429) {
+    return 'OpenAI rate-limited this request. Wait a moment and try again.'
+  }
+  return e.message ?? 'Unknown OpenAI error'
 }
