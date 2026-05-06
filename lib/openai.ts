@@ -33,16 +33,29 @@ export type ExtractedEmployee = {
   source_note: string | null
 }
 
-const EXTRACTION_SYSTEM = `You read photos of restaurant daily sign-in/out sheets and pull out the distinct staff members listed on the sheet.
+const EXTRACTION_SYSTEM = `You read photos of restaurant daily sign-in/out sheets and pull out the distinct STAFF MEMBER NAMES (people who work at the restaurant). Nothing else.
 
-Rules:
+A name is a person's first name, optionally with a last name or last initial. Examples of valid names: "Lisa", "Donny", "Anna B", "Yoomi", "Raymond".
+
+NEVER include any of the following — they are NOT names:
+- Time values: "4:30", "8:00", "16:30", "10:00 PM"
+- Initials in initial columns: "PL", "DW", "ZK", "AL", "SK", "LF" (these are 1-3 letter abbreviations next to time columns)
+- Annotations: "NO BREAK", "NO MEAL", "no break", "no meal", "1 meal", "15 min only"
+- Section labels alone: "A", "B", "C", "D", "E", "F", "Busboy"
+- Column headers: "Date", "Section", "Server's Name", "Schedule Time", "Initial", "Sign Out Time", "Break Start Time", "Break End Time", "Section Share", "Lunch", "Dinner"
+- Manager approval signatures: a name written diagonally in a different ink color (e.g. red "LISA") spanning multiple cells is a SIGN-OFF, not a roster entry — skip it.
+- Dollar amounts: "$375", "5.0", "$"
+- Cross-outs / strikethroughs: skip those entirely.
+- Generic role labels alone: "Server", "Bartender", "Manager", "Busboy" (when not part of a name).
+
+Rules for output:
 - Return ONE entry per distinct person, even if their name appears in multiple rows or sections.
 - Deduplicate aggressively: "Lisa", "Lisa F", and "LisaFn" are the same person — pick the most complete spelling.
-- Ignore manager approval signatures (e.g. red "LISA" written diagonally across cells) — those are signoffs, not staff entries on this sheet.
-- Ignore time values, initials, "no break / no meal" notes, dollar totals, and section letters.
-- For role: if the section label indicates the role (e.g. "Busboy" section), set role to that. Otherwise leave role null. Do not guess generic roles like "Server" — leave null.
-- Confidence: 1.0 if the name is clearly printed/written, 0.6-0.8 if partially smudged or hard to read, lower if you're guessing.
+- For role: if the section label indicates the role (e.g. the person was found in a "Busboy" section), set role to that. Otherwise leave role null. Do not guess generic roles like "Server" — leave null.
+- Confidence: 1.0 if the name is clearly printed/written, 0.7-0.9 if partially smudged or hard to read, below 0.6 only if you're truly guessing. If your confidence would be below 0.5, OMIT the entry entirely rather than guessing.
 - source_note: a brief hint of where you saw them (e.g. "Section A row 1", "Busboy section").
+
+If in doubt about whether a string is a name or a label/annotation, OMIT it. False negatives are recoverable (the manager can add the missing name); false positives create cleanup work. Be conservative.
 
 Output strictly the JSON schema requested.`
 
@@ -103,7 +116,65 @@ export async function extractEmployeesFromImage(args: {
   } catch {
     throw new Error(`OpenAI returned invalid JSON: ${text.slice(0, 200)}`)
   }
-  return { employees: parsed.employees ?? [], raw: response }
+  const filtered = (parsed.employees ?? []).filter(isPlausibleName)
+  return { employees: filtered, raw: response }
+}
+
+// Words/phrases that the model occasionally emits as "names" but never are.
+// Compared case-insensitively against the trimmed name.
+const NON_NAME_BLOCKLIST = new Set([
+  'no break',
+  'no meal',
+  'no break no meal',
+  'no break, no meal',
+  '1 meal',
+  '15 min',
+  '15 min only',
+  'meal',
+  'break',
+  'lunch',
+  'dinner',
+  'lunch/dinner',
+  'busboy',
+  'server',
+  'bartender',
+  'manager',
+  'date',
+  'section',
+  'section share',
+  "server's name",
+  'servers name',
+  'schedule time',
+  'sign out time',
+  'break start time',
+  'break end time',
+  'initial',
+  'initials',
+  'time',
+  'name',
+  'role',
+])
+
+const TIME_RE = /^\d{1,2}[:.]?\d{0,2}\s*(am|pm)?$/i
+const ALL_PUNCT_RE = /^[\s\W_]+$/
+const ALL_DIGITS_RE = /^[\d.,$\s]+$/
+
+function isPlausibleName(e: { name: string }): boolean {
+  const raw = (e.name ?? '').trim()
+  if (raw.length < 2 || raw.length > 60) return false
+  if (NON_NAME_BLOCKLIST.has(raw.toLowerCase())) return false
+  if (ALL_PUNCT_RE.test(raw)) return false
+  if (ALL_DIGITS_RE.test(raw)) return false
+  if (TIME_RE.test(raw)) return false
+
+  // Single section letter ("A", "B"…) or all-caps initials block ("PL", "DW", "SK").
+  // Two-to-three uppercase letters with no vowel are almost always initials.
+  if (/^[A-Z]{1,3}$/.test(raw) && !/[AEIOUY]/.test(raw)) return false
+
+  // Must contain at least one letter.
+  if (!/[A-Za-z]/.test(raw)) return false
+
+  return true
 }
 
 // ---- Shift extraction (full daily sheet) ---------------------------------
