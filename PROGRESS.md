@@ -101,11 +101,12 @@ by server.
 
 ### Not yet built
 
-- [ ] **PDF export** for biweekly reports *(parallel agent in flight)*
-- [ ] **Google Sheets and PDF UI buttons** on `/payroll/[id]/page.tsx`
-      (the routes exist; the page just needs the buttons wired up)
 - [ ] **Auth + RLS policies** so multiple managers can share the app safely
 - [ ] **Push to Vercel** (deploy prep is done; user actually triggers the deploy)
+
+PDF export, Google Sheets push, and the UI buttons that wire all three
+download paths into `/payroll/[id]` are now done — see
+`.agent-reports/pdf-export.md` and `.agent-reports/google-sheets.md`.
 
 ## Next time — open issues to tackle
 

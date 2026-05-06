@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { summarizePayPeriod, daysInRange } from '@/lib/payroll'
 import { ClosePeriodForm } from './ClosePeriodForm'
+import { PushToSheetsButton } from './PushToSheetsButton'
 import type { PayPeriod, DailySheet, Shift, AlcoholSale } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -63,7 +64,7 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
               )}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <a
               href={`/api/payroll/${id}/csv`}
               className="btn-secondary"
@@ -71,6 +72,14 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
             >
               Download CSV
             </a>
+            <a
+              href={`/api/payroll/${id}/pdf`}
+              className="btn-secondary"
+              download={`payroll_${period.start_date}_${period.end_date}.pdf`}
+            >
+              Download PDF
+            </a>
+            <PushToSheetsButton periodId={id} />
             <ClosePeriodForm id={id} status={period.status} />
           </div>
         </div>
