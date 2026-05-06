@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { approveScannedSheet, type ApproveInputType } from './actions'
+import { EmployeeCombobox } from '@/app/_components/EmployeeCombobox'
 import type { Employee } from '@/lib/types/db'
 
 /**
@@ -32,8 +33,6 @@ async function downscaleImage(file: File, maxLongSide: number, quality: number):
     )
   })
 }
-
-const OTHER = '__other__'
 
 type Candidate = {
   id: string
@@ -184,18 +183,22 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setCandidates((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)))
   }
 
-  function onEmployeeChange(id: string, value: string) {
-    if (value === OTHER) {
-      patchCandidate(id, { employee_id: null })
-      return
+  function onEmployeeChange(id: string, picked: { id: string | null; label: string }) {
+    if (picked.id) {
+      const e = employees.find((x) => x.id === picked.id)
+      if (e) {
+        patchCandidate(id, {
+          employee_id: e.id,
+          employee_name: e.full_name,
+          hourly_rate: e.hourly_rate,
+          role: e.role ?? '',
+        })
+        return
+      }
     }
-    const e = employees.find((x) => x.id === value)
-    if (!e) return
     patchCandidate(id, {
-      employee_id: e.id,
-      employee_name: e.full_name,
-      hourly_rate: e.hourly_rate,
-      role: e.role ?? '',
+      employee_id: null,
+      employee_name: picked.label,
     })
   }
 
@@ -380,7 +383,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
                     c={c}
                     employees={employees}
                     onPatch={(p) => patchCandidate(c.id, p)}
-                    onEmployeeChange={(v) => onEmployeeChange(c.id, v)}
+                    onEmployeeChange={(picked) => onEmployeeChange(c.id, picked)}
                   />
                 ))}
               </tbody>
@@ -531,7 +534,7 @@ function Row({
   c: Candidate
   employees: Employee[]
   onPatch: (p: Partial<Candidate>) => void
-  onEmployeeChange: (v: string) => void
+  onEmployeeChange: (picked: { id: string | null; label: string }) => void
 }) {
   const flagged = c.needs_review
   const lowConf = c.confidence < 0.7
@@ -551,26 +554,17 @@ function Row({
         />
       </td>
       <td className="px-2 py-2 align-top">
-        <select
-          value={c.employee_id ?? OTHER}
-          onChange={(e) => onEmployeeChange(e.target.value)}
-          className="input min-w-44"
-        >
-          {employees.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.full_name}
-            </option>
-          ))}
-          <option value={OTHER}>— Other —</option>
-        </select>
-        {!c.employee_id && (
-          <input
-            className="input mt-1 text-xs"
-            value={c.employee_name}
-            onChange={(e) => onPatch({ employee_name: e.target.value })}
-            placeholder="Type name"
-          />
-        )}
+        <EmployeeCombobox
+          options={employees.map((e) => ({
+            id: e.id,
+            label: e.full_name,
+            sublabel: e.role ?? undefined,
+          }))}
+          value={c.employee_id}
+          customLabel={c.employee_name}
+          onChange={onEmployeeChange}
+          className="min-w-44"
+        />
         {(lowConf || c.inferred_from_bracket) && (
           <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">
             {lowConf && `Low confidence ${Math.round(c.confidence * 100)}%`}

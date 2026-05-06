@@ -3,9 +3,8 @@
 import { useState, useTransition } from 'react'
 import { updateShift, deleteShift, type ShiftPatchInput } from '../actions'
 import { shiftPaidHours, shiftPay, formatMinutes, shiftPaidMinutes } from '@/lib/payroll'
+import { EmployeeCombobox } from '@/app/_components/EmployeeCombobox'
 import type { Shift, Employee } from '@/lib/types/db'
-
-const OTHER = '__other__'
 
 export function ShiftRows({
   shifts,
@@ -76,26 +75,31 @@ function Row({
     setS((cur) => ({ ...cur, [key]: value }))
   }
 
-  function onEmployeeChange(id: string) {
-    if (id === OTHER) {
-      // keep current name + rate, just clear the linkage
-      setField('employee_id', null)
-      commit({ employee_id: null })
-      return
+  function onEmployeeChange(picked: { id: string | null; label: string }) {
+    if (picked.id) {
+      const e = employees.find((x) => x.id === picked.id)
+      if (e) {
+        setS((cur) => ({
+          ...cur,
+          employee_id: e.id,
+          employee_name_snapshot: e.full_name,
+          hourly_rate_snapshot: e.hourly_rate,
+        }))
+        commit({
+          employee_id: e.id,
+          employee_name_snapshot: e.full_name,
+          hourly_rate_snapshot: e.hourly_rate,
+        })
+        return
+      }
     }
-    const e = employees.find((x) => x.id === id)
-    if (!e) return
+    // Custom typed name — unlink from any roster employee, keep typed text.
     setS((cur) => ({
       ...cur,
-      employee_id: e.id,
-      employee_name_snapshot: e.full_name,
-      hourly_rate_snapshot: e.hourly_rate,
+      employee_id: null,
+      employee_name_snapshot: picked.label,
     }))
-    commit({
-      employee_id: e.id,
-      employee_name_snapshot: e.full_name,
-      hourly_rate_snapshot: e.hourly_rate,
-    })
+    commit({ employee_id: null, employee_name_snapshot: picked.label })
   }
 
   const minutes = shiftPaidMinutes(s)
@@ -125,26 +129,20 @@ function Row({
   return (
     <tr>
       <td className="px-3 py-2">
-        <select
-          value={s.employee_id ?? OTHER}
-          onChange={(e) => onEmployeeChange(e.target.value)}
+        <EmployeeCombobox
+          options={employees.map((e) => ({
+            id: e.id,
+            label: e.full_name,
+            sublabel: e.role ?? undefined,
+          }))}
+          value={s.employee_id}
+          customLabel={s.employee_name_snapshot}
+          onChange={onEmployeeChange}
           disabled={pending}
-          className="input"
-        >
-          {employees.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.full_name}
-            </option>
-          ))}
-          <option value={OTHER}>{s.employee_id ? '— Other —' : `(unlinked) ${s.employee_name_snapshot}`}</option>
-        </select>
+          className="min-w-44"
+        />
         {!s.employee_id && (
-          <input
-            className="input mt-1 text-xs"
-            value={s.employee_name_snapshot}
-            onChange={(e) => setField('employee_name_snapshot', e.target.value)}
-            onBlur={() => commit({ employee_name_snapshot: s.employee_name_snapshot })}
-          />
+          <p className="mt-1 text-[10px] text-zinc-400">unlinked from roster</p>
         )}
       </td>
       <td className="px-3 py-2">

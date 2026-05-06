@@ -1,9 +1,8 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition } from 'react'
+import { useRef, useState, useTransition } from 'react'
+import { EmployeeCombobox } from '@/app/_components/EmployeeCombobox'
 import type { Employee } from '@/lib/types/db'
-
-const OTHER = '__other__'
 
 export function AddShiftForm({
   dailySheetId,
@@ -15,7 +14,7 @@ export function AddShiftForm({
   addShift: (formData: FormData) => Promise<void>
 }) {
   const formRef = useRef<HTMLFormElement>(null)
-  const [employeeId, setEmployeeId] = useState<string>(employees[0]?.id ?? OTHER)
+  const [employeeId, setEmployeeId] = useState<string | null>(employees[0]?.id ?? null)
   const [name, setName] = useState<string>(employees[0]?.full_name ?? '')
   const [rate, setRate] = useState<number>(employees[0]?.hourly_rate ?? 17.5)
   const [role, setRole] = useState<string>(employees[0]?.role ?? '')
@@ -24,26 +23,26 @@ export function AddShiftForm({
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
-  const employeeMap = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees])
-
-  function onSelectEmployee(id: string) {
-    setEmployeeId(id)
-    if (id === OTHER) {
-      setName('')
-      setRate(17.5)
-      setRole('')
-      setBreakMin(0)
-      setMeal(false)
-    } else {
-      const e = employeeMap.get(id)
+  function onSelectEmployee(picked: { id: string | null; label: string }) {
+    if (picked.id) {
+      const e = employees.find((x) => x.id === picked.id)
       if (e) {
+        setEmployeeId(e.id)
         setName(e.full_name)
         setRate(e.hourly_rate)
         setRole(e.role ?? '')
         setBreakMin(e.default_break_minutes)
         setMeal(e.default_meal_provided)
+        return
       }
     }
+    // Custom typed name
+    setEmployeeId(null)
+    setName(picked.label)
+    setRate(17.5)
+    setRole('')
+    setBreakMin(0)
+    setMeal(false)
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -52,7 +51,7 @@ export function AddShiftForm({
     const fd = new FormData(e.currentTarget)
     // Replace the select with the resolved id (or null) and inject snapshot fields.
     fd.set('daily_sheet_id', dailySheetId)
-    fd.set('employee_id', employeeId === OTHER ? '' : employeeId)
+    fd.set('employee_id', employeeId ?? '')
     fd.set('employee_name', name)
     fd.set('hourly_rate', rate.toString())
     if (meal) fd.set('meal_provided', 'on')
@@ -84,31 +83,22 @@ export function AddShiftForm({
       <div className="grid gap-3 sm:grid-cols-6">
         <div className="sm:col-span-2">
           <label className="block text-xs text-zinc-500">Employee</label>
-          <select
-            value={employeeId}
-            onChange={(e) => onSelectEmployee(e.target.value)}
-            className="input mt-1"
-          >
-            {employees.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.full_name}
-              </option>
-            ))}
-            <option value={OTHER}>— Other (type name) —</option>
-          </select>
-        </div>
-
-        {employeeId === OTHER && (
-          <div className="sm:col-span-2">
-            <label className="block text-xs text-zinc-500">Name</label>
-            <input
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="input mt-1"
+          <div className="mt-1">
+            <EmployeeCombobox
+              options={employees.map((e) => ({
+                id: e.id,
+                label: e.full_name,
+                sublabel: e.role ?? undefined,
+              }))}
+              value={employeeId}
+              customLabel={name}
+              onChange={onSelectEmployee}
             />
           </div>
-        )}
+          {!employeeId && name && (
+            <p className="mt-1 text-[10px] text-zinc-400">unlinked from roster</p>
+          )}
+        </div>
 
         <div>
           <label className="block text-xs text-zinc-500">Section</label>

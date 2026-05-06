@@ -168,9 +168,21 @@ Output strictly the JSON schema requested.`
 export async function extractShiftsFromImage(args: {
   imageBase64: string
   mimeType: string
+  roster?: { name: string; role?: string | null }[]
 }): Promise<{ sheet: ExtractedSheet; raw: unknown }> {
   const client = getOpenAI()
   const dataUrl = `data:${args.mimeType};base64,${args.imageBase64}`
+
+  // When we have a roster, inject it so the model anchors on canonical
+  // spellings instead of guessing at messy handwriting.
+  const rosterBlock =
+    args.roster && args.roster.length > 0
+      ? '\n\nCURRENT ROSTER (prefer these exact spellings when matching handwriting):\n' +
+        args.roster
+          .map((e) => `- ${e.name}${e.role ? ` (${e.role})` : ''}`)
+          .join('\n') +
+        '\nIf a name on the sheet plausibly matches one of these (case-insensitive, allowing for nicknames or partial spellings like "Lisa" / "LisaFn" / "Lisa F"), output the canonical spelling from the roster. If you genuinely cannot match, use the literal handwriting.'
+      : ''
 
   const response = await client.chat.completions.create({
     model: 'gpt-4o',
@@ -230,7 +242,7 @@ export async function extractShiftsFromImage(args: {
       },
     },
     messages: [
-      { role: 'system', content: SHIFT_EXTRACTION_SYSTEM },
+      { role: 'system', content: SHIFT_EXTRACTION_SYSTEM + rosterBlock },
       {
         role: 'user',
         content: [

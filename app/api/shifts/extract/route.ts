@@ -4,6 +4,7 @@ import {
   isOpenAIConfigured,
   OpenAINotConfiguredError,
 } from '@/lib/openai'
+import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 export const maxDuration = 90
@@ -42,10 +43,27 @@ export async function POST(request: NextRequest) {
   const buf = Buffer.from(await file.arrayBuffer())
   const base64 = buf.toString('base64')
 
+  // Pass the active roster to the model so it picks canonical spellings
+  // instead of guessing at messy handwriting.
+  let roster: { name: string; role: string | null }[] = []
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getSupabaseAdmin()
+      const { data } = await supabase
+        .from('employees')
+        .select('full_name, role')
+        .eq('active', true)
+      roster = (data ?? []).map((e) => ({ name: e.full_name, role: e.role }))
+    } catch {
+      // Roster fetch is best-effort. Extraction works fine without it.
+    }
+  }
+
   try {
     const { sheet } = await extractShiftsFromImage({
       imageBase64: base64,
       mimeType: file.type,
+      roster,
     })
     return NextResponse.json({ sheet })
   } catch (err) {
