@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { extractEmployeesFromImage, isOpenAIConfigured, OpenAINotConfiguredError } from '@/lib/openai'
+import { pdfToText } from '@/lib/parsers/pdf'
+import { xlsxToText } from '@/lib/parsers/excel'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -34,16 +36,38 @@ export async function POST(request: NextRequest) {
 
   const kind = classifyFile(file)
 
-  if (kind === 'text') {
-    const text = await file.text()
+  if (kind === 'text' || kind === 'pdf' || kind === 'excel') {
+    let text = ''
+    try {
+      if (kind === 'text') {
+        text = await file.text()
+      } else if (kind === 'pdf') {
+        const buf = Buffer.from(await file.arrayBuffer())
+        text = await pdfToText(buf)
+      } else if (kind === 'excel') {
+        const buf = Buffer.from(await file.arrayBuffer())
+        text = xlsxToText(buf)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to read file'
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+
     const employees = parseTextEmployees(text)
     if (employees.length === 0) {
       return NextResponse.json(
-        { error: 'No employee names found in this file. Expected one name per line, or a CSV with a name column.' },
+        {
+          error:
+            kind === 'pdf'
+              ? 'PDF was readable but no employee names were found. The roster might be in a layout the parser missed — try exporting to CSV.'
+              : kind === 'excel'
+              ? 'Excel file was readable but no employee names were found. Make sure the first column is the name.'
+              : 'No employee names found in this file. Expected one name per line, or a CSV with a name column.',
+        },
         { status: 400 }
       )
     }
-    return NextResponse.json({ employees })
+    return NextResponse.json({ employees, source: kind })
   }
 
   if (kind === 'image') {
@@ -78,15 +102,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Unsupported (PDF, Excel, etc.)
+  // Unknown / unsupported
   return NextResponse.json(
     {
-      error:
-        kind === 'pdf'
-          ? 'PDF uploads are not supported yet. Take a screenshot of the page or export it to CSV first.'
-          : kind === 'excel'
-          ? 'Excel uploads are not supported yet. In Excel: File → Save As → CSV, then re-upload.'
-          : `Unsupported file type "${file.type || file.name}". Upload an image (JPG, PNG, HEIC), or a CSV / TSV / text file with one name per line.`,
+      error: `Unsupported file type "${file.type || file.name}". Supported: image (JPG/PNG/HEIC), CSV, TSV, TXT, PDF, XLS, XLSX.`,
     },
     { status: 415 }
   )

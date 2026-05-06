@@ -234,7 +234,7 @@ function UploadCard({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,text/csv,text/plain,text/tab-separated-values,.csv,.tsv,.txt"
+          accept="image/*,text/csv,text/plain,text/tab-separated-values,application/pdf,.csv,.tsv,.txt,.pdf,.xls,.xlsx"
           disabled={step === 'extracting' || step === 'saving'}
           className="mt-3 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-700 dark:file:bg-zinc-100 dark:file:text-zinc-900 dark:hover:file:bg-zinc-300"
           onChange={(e) => {
@@ -243,8 +243,9 @@ function UploadCard({
           }}
         />
         <p className="mt-3 text-xs text-zinc-500">
-          Image (JPG/PNG/HEIC) → GPT-4o vision · CSV / TSV / TXT → parsed directly (no OCR cost).
-          For PDF or Excel, export to CSV first. Up to 10 MB.
+          Image (JPG/PNG/HEIC) → GPT-4o vision · CSV / TSV / TXT / PDF / XLS / XLSX → parsed
+          directly, no OCR cost. Up to 10 MB. Scanned PDFs without a text layer won’t work —
+          screenshot a page instead.
         </p>
         {step === 'extracting' && (
           <p className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
