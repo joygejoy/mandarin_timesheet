@@ -28,6 +28,7 @@ const ApproveInput = z.object({
   approved_by: z.string().trim().max(120).nullable().optional(),
   rows: z.array(ReviewedShift).min(1, 'Add at least one shift'),
   raw_ocr: z.unknown().optional(),
+  scan_image_path: z.string().trim().max(300).nullable().optional(),
 })
 
 export type ApproveInputType = z.input<typeof ApproveInput>
@@ -72,6 +73,7 @@ export async function approveScannedSheet(input: ApproveInputType): Promise<Appr
         pay_period_id: period?.id ?? null,
         status: 'reviewing',
         approved_by: data.approved_by ?? null,
+        scan_image_path: data.scan_image_path ?? null,
       })
       .select('id')
       .single()
@@ -79,6 +81,14 @@ export async function approveScannedSheet(input: ApproveInputType): Promise<Appr
     dailySheetId = created.id
   } else {
     reusedExistingSheet = true
+    if (data.scan_image_path) {
+      // Reused sheet: attach the image if the existing row doesn't already have one.
+      await supabase
+        .from('daily_sheets')
+        .update({ scan_image_path: data.scan_image_path })
+        .eq('id', dailySheetId)
+        .is('scan_image_path', null)
+    }
   }
 
   // Insert all the reviewed shift rows.
@@ -108,7 +118,7 @@ export async function approveScannedSheet(input: ApproveInputType): Promise<Appr
   if (data.raw_ocr !== undefined) {
     await supabase.from('ocr_extractions').insert({
       daily_sheet_id: dailySheetId!,
-      image_path: '(in-memory only)', // we don't persist the image yet
+      image_path: data.scan_image_path ?? '(no image stored)',
       model: 'gpt-4o',
       raw_response: data.raw_ocr as Record<string, unknown>,
       parsed_rows: rowsToInsert as unknown as Record<string, unknown>,

@@ -5,6 +5,7 @@ import {
   OpenAINotConfiguredError,
 } from '@/lib/openai'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
+import { uploadScanImage } from '@/lib/storage'
 
 export const runtime = 'nodejs'
 export const maxDuration = 90
@@ -65,7 +66,21 @@ export async function POST(request: NextRequest) {
       mimeType: file.type,
       roster,
     })
-    return NextResponse.json({ sheet })
+    let scan_image_path: string | null = null
+    if (isSupabaseConfigured()) {
+      try {
+        scan_image_path = await uploadScanImage({
+          bytes: buf,
+          mimeType: file.type,
+          originalFilename: file.name,
+        })
+      } catch (uploadErr) {
+        // Don't fail the OCR response if storage upload hiccups; the manager
+        // can still review and save shifts. The path stays null.
+        console.warn('[scan/extract] image upload failed:', uploadErr)
+      }
+    }
+    return NextResponse.json({ sheet, scan_image_path })
   } catch (err) {
     if (err instanceof OpenAINotConfiguredError) {
       return NextResponse.json({ error: err.message }, { status: 503 })

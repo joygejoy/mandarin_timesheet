@@ -7,33 +7,6 @@ import { approveScannedSheet, type ApproveInputType } from './actions'
 import { EmployeeCombobox } from '@/app/_components/EmployeeCombobox'
 import type { Employee } from '@/lib/types/db'
 
-/**
- * Downscale an image client-side so the OpenAI vision request is small
- * enough to upload reliably. Scales the longest side to maxLongSide,
- * encodes JPEG at the given quality. Returns a Blob suitable for FormData.
- */
-async function downscaleImage(file: File, maxLongSide: number, quality: number): Promise<Blob> {
-  const bitmap = await createImageBitmap(file)
-  const long = Math.max(bitmap.width, bitmap.height)
-  const scale = long > maxLongSide ? maxLongSide / long : 1
-  const w = Math.round(bitmap.width * scale)
-  const h = Math.round(bitmap.height * scale)
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('No 2d context')
-  ctx.drawImage(bitmap, 0, 0, w, h)
-  bitmap.close()
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error('canvas.toBlob failed'))),
-      'image/jpeg',
-      quality
-    )
-  })
-}
-
 type Candidate = {
   id: string
   include: boolean
@@ -51,6 +24,11 @@ type Candidate = {
   confidence: number
   inferred_from_bracket: boolean
   needs_review: boolean
+  // Snapshot of what the OCR predicted, kept stable across user edits so the
+  // review banner can show the model's original guess as evidence.
+  predicted_section: string
+  predicted_start_time: string
+  predicted_end_time: string
 }
 
 type SheetMeta = {
@@ -81,6 +59,7 @@ type ApiResponse = {
       inferred_from_bracket: boolean
     }[]
   }
+  scan_image_path?: string | null
   error?: string
 }
 
@@ -96,6 +75,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   const [sheetDate, setSheetDate] = useState<string>('')
   const [approvedBy, setApprovedBy] = useState<string>('')
   const [savedSheetId, setSavedSheetId] = useState<string | null>(null)
+  const [scanImagePath, setScanImagePath] = useState<string | null>(null)
   const [, startTransition] = useTransition()
 
   const employeeByLowerName = useMemo(() => {
@@ -114,17 +94,8 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setError(null)
     setStep('extracting')
 
-    // Downscale before upload so OpenAI doesn't drop the connection.
-    let uploadBlob: Blob = file
-    try {
-      uploadBlob = await downscaleImage(file, 2000, 0.85)
-    } catch {
-      // Fall back to the original file if canvas resize fails.
-    }
-
     const fd = new FormData()
-    const filename = file.name.replace(/\.[^.]+$/, '') + '.jpg'
-    fd.append('file', uploadBlob, filename)
+    fd.append('file', file, file.name)
     let res: Response
     try {
       res = await fetch('/api/shifts/extract', { method: 'POST', body: fd })
@@ -143,6 +114,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
 
     const sheet = json.sheet
     setRawOcr(sheet)
+    setScanImagePath(json.scan_image_path ?? null)
     setMeta({
       date_iso: sheet.date_iso,
       date_text: sheet.date_text,
@@ -155,7 +127,16 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
 
     const built = sheet.shifts.map((s, i): Candidate => {
       const employee = resolveEmployee(s.employee_name)
-      const lowConf = s.confidence < 0.7
+      // Anything below 0.8, or anchored on a bracket-shared time, must be
+      // verified by the manager — bracket misreads silently propagate to
+      // every row in the bracket, so we treat every bracket row as suspect.
+      const lowConf = s.confidence < 0.8
+      const needsReview =
+        lowConf ||
+        s.inferred_from_bracket ||
+        !employee ||
+        !s.start_time ||
+        !s.end_time
       return {
         id: `c${i}`,
         include: true,
@@ -172,7 +153,10 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         notes: s.notes ?? '',
         confidence: s.confidence,
         inferred_from_bracket: s.inferred_from_bracket,
-        needs_review: lowConf || !employee || !s.start_time || !s.end_time,
+        needs_review: needsReview,
+        predicted_section: s.section ?? '',
+        predicted_start_time: s.start_time ?? '',
+        predicted_end_time: s.end_time ?? '',
       }
     })
     setCandidates(built)
@@ -222,6 +206,9 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         confidence: 1,
         inferred_from_bracket: false,
         needs_review: false,
+        predicted_section: '',
+        predicted_start_time: '',
+        predicted_end_time: '',
       },
     ])
   }
@@ -262,6 +249,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
           approved_by: approvedBy.trim() || null,
           rows,
           raw_ocr: rawOcr,
+          scan_image_path: scanImagePath,
         }
         const result = await approveScannedSheet(payload)
         setSavedSheetId(result.daily_sheet_id)
@@ -281,6 +269,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setCandidates([])
     setMeta(null)
     setRawOcr(null)
+    setScanImagePath(null)
     setSheetDate('')
     setApprovedBy('')
     setSavedSheetId(null)
@@ -360,6 +349,18 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
             approvedBy={approvedBy}
             setApprovedBy={setApprovedBy}
           />
+
+          {flaggedCount > 0 && (
+            <div className="rounded-md border-l-4 border-rose-500 bg-rose-50 p-3 text-sm text-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+              <p className="font-semibold">
+                {flaggedCount} {flaggedCount === 1 ? 'row needs' : 'rows need'} review
+              </p>
+              <p className="mt-1 text-xs">
+                Rows in red are unreliable: low confidence, bracket-shared times, or missing fields.
+                Compare each one against the photo, fix anything wrong, then click <strong>Confirm</strong>.
+              </p>
+            </div>
+          )}
 
           <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
             <table className="min-w-full text-sm">
@@ -538,12 +539,27 @@ function Row({
 }) {
   const flagged = c.needs_review
   const lowConf = c.confidence < 0.7
+  const incomplete = !c.start_time || !c.end_time
+
+  // Cell-level "must review" hints: a field is suspect when the model said so
+  // (low overall confidence or bracket-inferred) AND the manager hasn't yet
+  // edited the predicted value. Clearing the row's review flag (Confirm)
+  // also clears the cell highlights.
+  const startSuspect =
+    flagged && (lowConf || c.inferred_from_bracket) && c.start_time === c.predicted_start_time
+  const endSuspect =
+    flagged && (lowConf || c.inferred_from_bracket) && c.end_time === c.predicted_end_time
+  const sectionSuspect =
+    flagged && lowConf && c.section === c.predicted_section
+
   const rowClass = !c.include
     ? 'opacity-50'
     : flagged
-    ? 'bg-amber-50/60 dark:bg-amber-950/20'
+    ? 'bg-rose-50/70 dark:bg-rose-950/30 border-l-4 border-rose-500'
     : ''
-  const incomplete = !c.start_time || !c.end_time
+  const suspectCellClass =
+    'border-rose-400 ring-1 ring-rose-300 bg-white dark:bg-zinc-900'
+
   return (
     <tr className={rowClass}>
       <td className="px-2 py-2 align-top">
@@ -565,39 +581,66 @@ function Row({
           onChange={onEmployeeChange}
           className="min-w-44"
         />
-        {(lowConf || c.inferred_from_bracket) && (
-          <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">
-            {lowConf && `Low confidence ${Math.round(c.confidence * 100)}%`}
-            {lowConf && c.inferred_from_bracket && ' · '}
-            {c.inferred_from_bracket && 'inferred from bracket'}
-          </p>
+        {flagged && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center rounded-sm bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+              Must review
+            </span>
+            <button
+              type="button"
+              onClick={() => onPatch({ needs_review: false })}
+              className="rounded-sm border border-emerald-600 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300"
+            >
+              Confirm
+            </button>
+            <span className="text-[10px] text-rose-700 dark:text-rose-300">
+              {lowConf && `${Math.round(c.confidence * 100)}% conf`}
+              {lowConf && c.inferred_from_bracket && ' · '}
+              {c.inferred_from_bracket && 'bracket-shared'}
+            </span>
+          </div>
         )}
       </td>
       <td className="px-2 py-2 align-top">
         <input
-          className="input w-12"
+          className={`input w-12 ${sectionSuspect ? suspectCellClass : ''}`}
           maxLength={20}
           value={c.section}
           onChange={(e) => onPatch({ section: e.target.value })}
         />
+        {flagged && c.predicted_section && c.section !== c.predicted_section && (
+          <p className="mt-1 text-[10px] text-zinc-500">
+            model said: <span className="font-medium">{c.predicted_section}</span>
+          </p>
+        )}
       </td>
       <td className="px-2 py-2 align-top">
-        <input
-          type="time"
-          className="input w-24"
-          value={c.start_time}
-          onChange={(e) => onPatch({ start_time: e.target.value })}
-        />
+        <div className={startSuspect ? `rounded ${suspectCellClass}` : ''}>
+          <TimeInput
+            value={c.start_time}
+            onChange={(v) => onPatch({ start_time: v })}
+          />
+        </div>
+        {flagged && c.predicted_start_time && c.start_time !== c.predicted_start_time && (
+          <p className="mt-1 text-[10px] text-zinc-500">
+            model said: <span className="font-medium">{formatTime12(c.predicted_start_time)}</span>
+          </p>
+        )}
       </td>
       <td className="px-2 py-2 align-top">
-        <input
-          type="time"
-          className="input w-24"
-          value={c.end_time}
-          onChange={(e) => onPatch({ end_time: e.target.value })}
-        />
+        <div className={endSuspect ? `rounded ${suspectCellClass}` : ''}>
+          <TimeInput
+            value={c.end_time}
+            onChange={(v) => onPatch({ end_time: v })}
+          />
+        </div>
         {incomplete && c.include && (
           <p className="mt-1 text-[10px] text-rose-600">missing</p>
+        )}
+        {flagged && c.predicted_end_time && c.end_time !== c.predicted_end_time && (
+          <p className="mt-1 text-[10px] text-zinc-500">
+            model said: <span className="font-medium">{formatTime12(c.predicted_end_time)}</span>
+          </p>
         )}
       </td>
       <td className="px-2 py-2 align-top">
@@ -636,4 +679,127 @@ function Row({
       </td>
     </tr>
   )
+}
+
+function TimeInput({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (v: string) => void
+}) {
+  // Single text input. User types 12-hour with AM/PM ("8:30 PM", "830pm",
+  // "8 am", "16:30"); blur parses to canonical 24-hour "HH:MM" for storage.
+  // Display is always 12-hour with AM/PM. Restaurant default for ambiguous
+  // bare numbers (e.g. "8") is PM since most shifts are evening.
+  const [text, setText] = useState(() => formatTime12(value))
+  const [prevValue, setPrevValue] = useState(value)
+  if (value !== prevValue) {
+    setPrevValue(value)
+    setText(formatTime12(value))
+  }
+
+  function commit() {
+    const parsed = parseTime12(text)
+    if (parsed === null) {
+      // Unparseable — revert display to the last known good value.
+      setText(formatTime12(value))
+      return
+    }
+    setText(formatTime12(parsed))
+    if (parsed !== value) onChange(parsed)
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      aria-label="Time"
+      className="input w-24 px-2 text-center text-sm tabular-nums"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+      }}
+      placeholder="8:30 PM"
+    />
+  )
+}
+
+/** "HH:MM" 24-hour → "h:mm AM/PM". Returns "" for empty/invalid input. */
+function formatTime12(hhmm: string): string {
+  if (!hhmm) return ''
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim())
+  if (!m) return ''
+  const h = Number(m[1])
+  const min = Number(m[2])
+  if (h < 0 || h > 23 || min < 0 || min > 59) return ''
+  const period = h >= 12 ? 'PM' : 'AM'
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
+  return `${h12}:${String(min).padStart(2, '0')} ${period}`
+}
+
+/**
+ * Parse loose 12-hour input ("8:30 PM", "830pm", "8 am", "16:30", "8") into
+ * canonical 24-hour "HH:MM". Returns "" for empty input, null if unparseable.
+ */
+function parseTime12(input: string): string | null {
+  const s = input.trim().toLowerCase().replace(/\s+/g, '').replace(/\./g, '')
+  if (!s) return ''
+
+  let period: 'am' | 'pm' | null = null
+  let body = s
+  if (/p\.?m\.?$/.test(s)) {
+    period = 'pm'
+    body = s.replace(/p\.?m\.?$/, '')
+  } else if (/a\.?m\.?$/.test(s)) {
+    period = 'am'
+    body = s.replace(/a\.?m\.?$/, '')
+  } else if (s.endsWith('p')) {
+    period = 'pm'
+    body = s.slice(0, -1)
+  } else if (s.endsWith('a')) {
+    period = 'am'
+    body = s.slice(0, -1)
+  }
+  body = body.replace(/[^\d:]/g, '')
+  if (!body) return null
+
+  let h = NaN
+  let min = 0
+  if (body.includes(':')) {
+    const [hp, mp = '0'] = body.split(':')
+    h = Number(hp)
+    min = Number(mp)
+  } else if (body.length <= 2) {
+    h = Number(body)
+    min = 0
+  } else if (body.length === 3) {
+    h = Number(body.slice(0, 1))
+    min = Number(body.slice(1))
+  } else if (body.length === 4) {
+    h = Number(body.slice(0, 2))
+    min = Number(body.slice(2))
+  } else {
+    return null
+  }
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return null
+  if (min < 0 || min > 59) return null
+  if (h < 0) return null
+
+  if (period === 'am') {
+    if (h === 12) h = 0
+    else if (h > 12) return null
+  } else if (period === 'pm') {
+    if (h > 12) return null
+    if (h !== 12) h += 12
+  } else {
+    // No period given. Restaurant default: hours 1-11 → PM. 0/12 stay as-is
+    // (12 reads as noon; 0 as midnight). Hours 13-23 are already 24-hour.
+    if (h >= 1 && h <= 11) h += 12
+  }
+  if (h > 23) return null
+
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
 }

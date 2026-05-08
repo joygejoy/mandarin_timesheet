@@ -153,6 +153,73 @@ const NON_NAME_BLOCKLIST = new Set([
   'time',
   'name',
   'role',
+  'dining room',
+  'dining',
+  'kitchen',
+  'bar',
+  'patio',
+  'host',
+  'host stand',
+  'hostess',
+  'hostess stand',
+  'front',
+  'front of house',
+  'back',
+  'back of house',
+  'foh',
+  'boh',
+  'lobby',
+  'counter',
+  'takeout',
+  'take out',
+  'to go',
+  'togo',
+  'expo',
+  'pass',
+  'window',
+  'room',
+  'area',
+  'station',
+  'banquet',
+  'grill',
+  'grlil',
+  'share',
+  'shares',
+  'driver',
+  'hotel',
+  'school',
+])
+
+// Common-noun room/area tokens. If every word in a candidate name is one of
+// these, it's a section header, not a person.
+const AREA_WORD_SET = new Set([
+  'dining',
+  'room',
+  'kitchen',
+  'bar',
+  'patio',
+  'host',
+  'hostess',
+  'stand',
+  'front',
+  'back',
+  'house',
+  'of',
+  'foh',
+  'boh',
+  'lobby',
+  'counter',
+  'takeout',
+  'togo',
+  'expo',
+  'pass',
+  'window',
+  'area',
+  'station',
+  'side',
+  'main',
+  'upstairs',
+  'downstairs',
 ])
 
 const TIME_RE = /^\d{1,2}[:.]?\d{0,2}\s*(am|pm)?$/i
@@ -173,6 +240,11 @@ function isPlausibleName(e: { name: string }): boolean {
 
   // Must contain at least one letter.
   if (!/[A-Za-z]/.test(raw)) return false
+
+  // Drop candidates whose every token is a room/area word ("Dining Room",
+  // "Front of House", "Bar Station", "Host Stand").
+  const tokens = raw.toLowerCase().split(/[\s\-/]+/).filter(Boolean)
+  if (tokens.length > 0 && tokens.every((t) => AREA_WORD_SET.has(t))) return false
 
   return true
 }
@@ -207,24 +279,54 @@ export type ExtractedSheet = {
 
 const SHIFT_EXTRACTION_SYSTEM = `You read photos of restaurant daily sign-in/out sheets and extract one row per worked shift.
 
-The sheet has these columns from left to right:
-- Date (top of page; usually a weekday + month/day; "Lunch" or "Dinner" is circled)
-- Section (letter A-F or words like "Busboy")
-- Server's Name
-- Schedule Time (start time)
-- Initial (next to schedule time)
-- Sign Out Time (end time)
-- Initial
-- Break Start Time
-- Initial
-- Break End Time
-- Initial
-- Section Share (IGNORE THIS COLUMN — do not include it in output)
+THE SHEET HAS THESE COLUMNS FROM LEFT TO RIGHT (memorize this order — it is the most common source of error):
+  Col 1: Section          (letter A-F, or words like "Busboy")
+  Col 2: Server's Name
+  Col 3: Schedule Time    → maps to output field  start_time      (the SHIFT START — the earliest time on the row)
+  Col 4: Initial
+  Col 5: Sign Out Time    → maps to output field  end_time        (the SHIFT END — the LATEST time on the row, written when the server clocked out)
+  Col 6: Initial
+  Col 7: Break Start Time → maps to output field  break_start_time (a time INSIDE the shift, when they went on break)
+  Col 8: Initial
+  Col 9: Break End Time   → maps to output field  break_end_time   (a time INSIDE the shift, when they came back from break)
+  Col 10: Initial
+  Col 11: Section Share   → IGNORE — never put this anywhere in output
 
-Rules:
-- ALL times in 24-hour "HH:MM" format. Restaurant context: a written "4:30" with no AM/PM means 16:30 unless context proves otherwise (e.g. lunch sheet morning shifts).
-- Bracket notation: a curly brace or vertical line connecting multiple rows to ONE end-time means that end-time applies to every row in the bracket. Apply the time to each row AND set inferred_from_bracket=true on those rows.
-- "NO BREAK NO MEAL" (or "no break", "no meal") written across multiple rows applies to every row underneath the annotation: set break_minutes=0, break_start_time=null, break_end_time=null, meal_provided=false, and put "no break, no meal" in the notes field.
+CRITICAL — the most common mistakes the model makes:
+- DO NOT confuse Sign Out Time (Col 5) with Break Start Time (Col 7). They are TWO COLUMNS APART, separated by an Initial column. Read by counting columns from the left.
+- end_time is the time the server FINISHED their shift (last time on the row, usually evening or end-of-lunch).
+- break_start_time is a time MID-SHIFT and is always between start_time and end_time.
+- SANITY CHECK before outputting each row: end_time > start_time, AND if break_start_time and break_end_time are present, then start_time < break_start_time < break_end_time < end_time. If your reading violates this ordering, you mis-assigned a column — re-read.
+- A row with only TWO times filled in (start + end, no break) is normal. Do NOT shift the second time leftward into break_start_time. It is end_time.
+
+STICKY SECTION RULE — read this carefully (this is where the model frequently over-reaches):
+- The Section column (Col 1) is sometimes sticky: the section letter is written ONCE at the top of a block and inherited by rows directly beneath it.
+- BUT propagation stops the moment Col 1 contains ANY marking — a letter, a circled letter, a colored-ink letter, a scribble, a stamp, a tick. ANY visible mark in Col 1 means a NEW section starts on that row, even if the mark is messy or partly illegible. Do NOT inherit from above past such a mark.
+- Section letters are often written in DIFFERENT INK COLORS (red, blue, black) and may be circled. Treat colored or circled letters as authoritative section labels — do not skip them just because they are in red or look decorative.
+- Each horizontal "band" of the sheet (separated by repeated column-header rows: "Section | Server's Name | Schedule Time | …") has its OWN independent section letters. NEVER propagate a section letter across a band boundary.
+- Sections do not skip alphabetically within a band: if you see A then C with no B label between them, B simply has no shifts — do NOT relabel C as B.
+- If you genuinely cannot read Col 1 for a row (mark is present but unreadable), output the row with section: null and confidence ≤ 0.6 rather than inheriting from above.
+- Only emit section: null when the row is outside any section block (rare).
+
+NOTES FIELD RULE:
+- The notes field is for FULL TEXTUAL annotations only: "no break, no meal", "1 meal", "15 min only", "lipa lisa", "tip-out cash". NEVER put a time value, a number alone, or a fragment in notes.
+- If an annotation also drives a structured field (e.g. "1 meal" → meal_provided=true, "15 min only" → break_minutes=15, "no break" → break_minutes=0), DO NOT also copy the annotation into notes. The notes field is reserved for free-text observations the structured fields can't capture.
+- NEVER put a sign-out time, break start, or break end into notes — those belong in their dedicated time fields.
+- If you would output something less than 3 characters or a single fragment ("1 n", "no", "8:", "Le"), output null instead — it's noise.
+
+DIGIT DISCIPLINE (8 vs 9, propagation, etc.):
+- Bracket-target times are written ONCE and apply to multiple rows. A single misread propagates to every row in the bracket — so be especially careful with these. When in doubt, lower confidence on every row in the bracket rather than guessing.
+- Distinguish 8 from 9 by counting closed loops. An "8" has TWO closed loops stacked vertically. A "9" has ONE closed loop with a tail/stem going down (or curving). If you see two loops, it's an 8 — even if the handwriting is slanted, slim, or messy.
+- Distinguish 0 from 6, 1 from 7, 3 from 8 with the same care: count loops and trace the stem direction.
+- Restaurant dinner shifts can end anywhere between roughly 20:00 and 23:30. Do NOT bias toward later times — 8:30 PM and 9:30 PM are both common end-times. Read the digit; do not guess.
+- If you have ANY uncertainty between 8 and 9 (or any other adjacent digit pair) on a bracket-target time, set confidence ≤ 0.6 on every row in that bracket. The manager will spot-check those rows.
+
+Other rules:
+- ALL times in 24-hour "HH:MM" format. Restaurant context: a written "4:30" with no AM/PM means 16:30 unless context proves otherwise (e.g. lunch sheet morning shifts where 4:30 is impossible).
+- Bracket notation: a curly brace or vertical line connecting multiple rows to ONE end-time means that end-time applies to every row in the bracket. Apply the time to each row AND set inferred_from_bracket=true on those rows. The row where the bracket STARTS gets the same time as the rows below it.
+- "NO BREAK NO MEAL" (or "no break", "no meal", "NO BRK", "n/b") written across multiple rows applies to every row underneath the annotation: set break_minutes=0, break_start_time=null, break_end_time=null, meal_provided=false, and put "no break, no meal" in the notes field.
+- IMPORTANT: When a row says "no break" anywhere across its break columns (even just a single "NO BRK" scribble), the row has NO break. Do NOT extract any times from that row's break columns — set break_start_time=null, break_end_time=null, break_minutes=0. NEVER hallucinate break times for a row that says no break.
+- "Sign", "Sign Out", "S/O", or "SO" written before a time (e.g. "Sign 3:30", "S/O 4:00") indicates a SIGN-OUT TIME. That time goes in end_time, NEVER in break_start_time or break_end_time. If you see "Sign 3:30" in the break-columns area, the writer ran out of room in the Sign Out column — the time still belongs in end_time.
 - "1 meal" or "meal" handwritten in a row means meal_provided=true.
 - "15 min only" or similar means break_minutes=15 (or as written) regardless of break_start/end times.
 - IGNORE manager approval signatures (large diagonal handwriting like "LISA" in red across cells). Capture the manager name in approved_by_signature and do NOT create a shift row for it.
@@ -232,7 +334,7 @@ Rules:
 - Cross-outs and strikethroughs: skip those rows entirely OR mark confidence < 0.5 if unsure.
 - Same person may appear multiple times on one sheet (different sections or split shifts) — that's fine, emit one row per occurrence.
 - For each shift compute break_minutes from break_start_time and break_end_time when both are present (else 0).
-- Confidence: 1.0 = clearly readable; 0.7-0.9 = mostly readable, one field is fuzzy; below 0.6 = guessing.
+- Confidence: 1.0 = clearly readable; 0.7-0.9 = mostly readable, one field is fuzzy; below 0.6 = guessing. If you had to violate the sanity check above and aren't sure, lower confidence to 0.5.
 
 Output strictly the JSON schema requested.`
 
@@ -334,5 +436,48 @@ export async function extractShiftsFromImage(args: {
   } catch {
     throw new Error(`OpenAI returned invalid JSON: ${text.slice(0, 200)}`)
   }
+  for (const shift of parsed.shifts ?? []) {
+    if (!hasConsistentTimes(shift)) {
+      shift.confidence = Math.min(shift.confidence, 0.4)
+    }
+    shift.notes = cleanNotes(shift.notes)
+  }
   return { sheet: parsed, raw: response }
+}
+
+// Drops noise the model sometimes drops into the notes field: short fragments,
+// time-like strings, single-letter junk, lone numbers. Keeps real annotations
+// like "no break, no meal", "1 meal", "15 min only", "lipa lisa".
+function cleanNotes(raw: string | null): string | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (trimmed.length < 3) return null
+  // Pure number, optionally with a single trailing letter ("1 n", "15 m", "8").
+  if (/^\d+\s*[a-z]?\s*$/i.test(trimmed)) return null
+  // A time fragment (e.g. "8:30", "08:0", "10:").
+  if (/^\d{1,2}:\d{0,2}$/.test(trimmed)) return null
+  return trimmed
+}
+
+// Returns false if the times on a row violate the natural ordering
+// start < (break_start < break_end) < end. Used to flag rows where the model
+// likely confused the Sign Out column with the Break Start column.
+function hasConsistentTimes(s: ExtractedShift): boolean {
+  const toMin = (t: string | null): number | null => {
+    if (!t) return null
+    const m = /^(\d{1,2}):(\d{2})$/.exec(t)
+    if (!m) return null
+    return Number(m[1]) * 60 + Number(m[2])
+  }
+  const start = toMin(s.start_time)
+  const end = toMin(s.end_time)
+  const bs = toMin(s.break_start_time)
+  const be = toMin(s.break_end_time)
+  if (start != null && end != null && end <= start) return false
+  if (bs != null && be != null && be <= bs) return false
+  if (bs != null && start != null && bs < start) return false
+  if (bs != null && end != null && bs >= end) return false
+  if (be != null && start != null && be <= start) return false
+  if (be != null && end != null && be > end) return false
+  return true
 }

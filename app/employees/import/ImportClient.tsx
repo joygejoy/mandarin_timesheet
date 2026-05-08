@@ -5,28 +5,6 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { bulkImportEmployees, type BulkImportResult } from './actions'
 
-async function downscaleImage(file: File, maxLongSide: number, quality: number): Promise<Blob> {
-  const bitmap = await createImageBitmap(file)
-  const long = Math.max(bitmap.width, bitmap.height)
-  const scale = long > maxLongSide ? maxLongSide / long : 1
-  const w = Math.round(bitmap.width * scale)
-  const h = Math.round(bitmap.height * scale)
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('No 2d context')
-  ctx.drawImage(bitmap, 0, 0, w, h)
-  bitmap.close()
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error('canvas.toBlob failed'))),
-      'image/jpeg',
-      quality
-    )
-  })
-}
-
 type Candidate = {
   id: string                    // local-only client id
   include: boolean
@@ -65,21 +43,8 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
     setError(null)
     setStep('extracting')
 
-    // Downscale images before upload so OpenAI doesn't drop the connection
-    // on multi-megabyte phone photos. Non-images (CSV, text) go through as-is.
-    let uploadBlob: Blob = file
-    let uploadName = file.name
-    if (isImage) {
-      try {
-        uploadBlob = await downscaleImage(file, 2000, 0.85)
-        uploadName = file.name.replace(/\.[^.]+$/, '') + '.jpg'
-      } catch {
-        // Fall back to the original file if canvas resize fails.
-      }
-    }
-
     const fd = new FormData()
-    fd.append('file', uploadBlob, uploadName)
+    fd.append('file', file, file.name)
     let res: Response
     try {
       res = await fetch('/api/employees/extract', { method: 'POST', body: fd })

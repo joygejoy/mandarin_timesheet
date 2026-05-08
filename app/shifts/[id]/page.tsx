@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { getScanSignedUrl } from '@/lib/storage'
 import { summarizeDay } from '@/lib/payroll'
 import { addShift, setDailySheetStatus, deleteDailySheet } from '../actions'
 import { ShiftRows } from './ShiftRows'
@@ -57,6 +58,7 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
   }
 
   const summary = summarizeDay(shifts)
+  const scanImageUrl = await getScanSignedUrl(sheet.scan_image_path)
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -91,6 +93,24 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
       </header>
 
       <SummaryCards summary={summary} />
+
+      {scanImageUrl && (
+        <section className="mt-6">
+          <details className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <summary className="cursor-pointer text-sm font-medium text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100">
+              Original sheet photo
+            </summary>
+            <div className="mt-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={scanImageUrl}
+                alt="Scanned daily sign-in/out sheet"
+                className="max-h-[80vh] w-full rounded border border-zinc-200 object-contain dark:border-zinc-800"
+              />
+            </div>
+          </details>
+        </section>
+      )}
 
       <section className="mt-8">
         <h2 className="mb-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">Add a shift</h2>
