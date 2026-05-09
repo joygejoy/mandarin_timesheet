@@ -281,10 +281,70 @@ Restrained-MD3 design system
       (Fraunces); the user explicitly preferred plain Geist. Display
       typography removed. Character now lives in layout, color, and motion.
 
+### Where you are right now
+
+- **Head of `main`:** `8f293b4` — restrained-MD3 design system + shared
+  PageHero across all pages. Pushed to GitHub. `npm run build` passes
+  clean (12.3s, 18 routes, no TS errors).
+- **Local dev server:** runs on http://localhost:3000.
+- **Deploy:** intentionally on hold. Repo is fully prod-ready; resume with
+  the checklist below when ready.
+
+### Next: deploy to Vercel (chose CLI flow + new prod Supabase)
+
+When you come back, work through this in order. Each step is "Browser" or
+"Terminal." Anything marked 🟡 is interactive — you'll need to type values.
+
+1. **(Browser)** Create the production Supabase project at
+   https://supabase.com/dashboard → New Project. Save the DB password.
+2. **(Browser)** SQL Editor → paste `supabase/migrations/0001_init.sql` →
+   Run. Creates the schema.
+3. **(Browser)** Project Settings → API → copy three values:
+   `Project URL`, `anon public`, `service_role secret`.
+4. **(Browser)** Confirm OpenAI billing has at least **$5** in credits at
+   https://platform.openai.com/settings/organization/billing — otherwise
+   scans return `insufficient_quota`.
+5. **(Terminal)** `npm i -g vercel`
+6. **🟡 (Terminal)** `! vercel login` — pick the auth tied to your GitHub.
+7. **🟡 (Terminal)** `! vercel link` — first deploy: not linked to existing,
+   project name `mandarin-timesheet`, directory `./`.
+8. **🟡 (Terminal)** Add env vars one at a time, selecting Production +
+   Preview + Development for all of them:
+   - `! vercel env add NEXT_PUBLIC_SUPABASE_URL`
+   - `! vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `! vercel env add SUPABASE_SERVICE_ROLE_KEY`
+   - `! vercel env add OPENAI_API_KEY`
+9. **🟡 (Terminal)** `! vercel --prod` — first build ~2 min.
+10. **(Browser)** Smoke-test the deploy URL: `/employees` (add a test
+    employee), `/scan` (upload a photo).
+11. **(Browser, strongly recommended)** Vercel dashboard → your project →
+    Settings → **Deployment Protection** → enable for Production. There's
+    no in-app auth yet; without protection anyone with the URL can
+    read/write all data.
+
+**Tier note:** `/api/shifts/extract` declares `maxDuration = 90s`. The
+**Hobby** (free) tier caps at 60s; **Pro** ($20/mo) honors 90s. Most scans
+fit Hobby because the image is downscaled client-side, but very large
+sheets may time out. Start on Hobby.
+
+### Design follow-ups (not blocking deploy)
+
+- [ ] **`/shifts/[id]` (single sheet detail)** — not yet migrated to
+      `PageHero`. The "Approve" button there is the obvious place to swap
+      `btn-primary` → `btn-tertiary` (green = success).
+- [ ] **`/scan` interior (`ScanClient`, OCR review table)** — dense client
+      component; design pass deferred until eyeball pass.
+- [ ] **`/employees/import` and `/employees/new` forms** — also dense; same
+      reason.
+- [ ] **`/payroll/[id]` calendar day boxes** — could pick up green left
+      rails on approved days for stronger visual scanning.
+- [ ] **Mobile drawer a11y** — `role="dialog"` + `aria-modal="true"` +
+      focus trap + `overscroll-behavior: contain` (flagged in Vercel Web
+      Interface Guidelines audit, deferred from the system pass).
+
 ### Not yet built
 
 - [ ] **Auth + RLS policies** so multiple managers can share the app safely.
-- [ ] **Push to Vercel** (deploy prep is done; user actually triggers the deploy).
 - [ ] **Alcohol points in the scan flow** — discussed: per-row columns would
       be confusing for multi-shift servers; better path is a separate
       "Alcohol points" panel below the shifts table on the scan review
