@@ -18,9 +18,9 @@ export function Sidebar() {
     <aside className="hidden w-56 shrink-0 border-r border-[color:var(--border)] px-3 py-6 md:block">
       <Link
         href="/"
-        className="mb-6 flex items-center gap-2 px-2 text-sm font-medium tracking-tight text-[color:var(--foreground)]"
+        className="mb-6 flex items-center gap-2 px-2 text-base font-semibold tracking-tight text-[color:var(--foreground)]"
       >
-        <span className="inline-block h-2 w-2 rounded-sm bg-[color:var(--accent)]" />
+        <span className="inline-block h-3 w-3 rounded-sm bg-[color:var(--accent)]" />
         Mandarin
       </Link>
       <nav className="flex flex-col gap-0.5 text-sm">
@@ -32,10 +32,10 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={
-                'rounded-md px-2 py-1.5 transition ' +
+                'rounded-md border-l-2 px-2 py-1.5 transition ' +
                 (active
-                  ? 'bg-black/5 font-medium text-[color:var(--foreground)] dark:bg-white/10'
-                  : 'text-[color:var(--muted)] hover:bg-black/5 hover:text-[color:var(--foreground)] dark:hover:bg-white/5')
+                  ? 'border-[color:var(--accent)] bg-[color:var(--accent-tint)] font-medium text-[color:var(--foreground)]'
+                  : 'border-transparent text-[color:var(--muted)] hover:bg-black/5 hover:text-[color:var(--foreground)] dark:hover:bg-white/5')
               }
             >
               {item.label}

@@ -1,4 +1,5 @@
 import type { Shift, AlcoholSale } from '@/lib/types/db'
+import { normalizeEmployeeName } from '@/lib/normalize'
 
 /** Parse a "HH:MM" or "HH:MM:SS" string into minutes since midnight. */
 function timeToMinutes(t: string | null | undefined): number | null {
@@ -231,7 +232,7 @@ export function summarizePayPeriod(days: DaySheetWithChildren[]): BiweeklySummar
     dateSet.add(day.sheet_date)
 
     for (const s of day.shifts) {
-      const key = s.employee_id ?? `__name__:${s.employee_name_snapshot.toLowerCase()}`
+      const key = biweeklyKey(s.employee_name_snapshot)
       const minutes = shiftPaidMinutes(s)
       const gross = shiftGrossPay(s)
       const deduction = shiftMealDeduction(s)
@@ -256,7 +257,7 @@ export function summarizePayPeriod(days: DaySheetWithChildren[]): BiweeklySummar
     }
 
     for (const a of day.alcohol_sales) {
-      const key = a.employee_id ?? `__name__:${a.employee_name_snapshot.toLowerCase()}`
+      const key = biweeklyKey(a.employee_name_snapshot)
       totalPoints += a.drink_points
 
       const row = ensureBiweeklyRow(byEmployee, key, {
@@ -308,8 +309,21 @@ function ensureBiweeklyRow(
       by_date: {},
     }
     map.set(key, row)
+  } else if (!row.employee_id && seed.employee_id) {
+    row.employee_id = seed.employee_id
   }
   return row
+}
+
+/**
+ * Group key for the biweekly summary. Falls back to the normalized name so
+ * shifts with no employee_id (OCR rows that didn't match the roster) merge
+ * with id-bearing shifts for the same person, and so spelling variants
+ * ("Lisa F" / "lisa  f." / "Lísa-F") collapse into a single row.
+ */
+function biweeklyKey(name: string): string {
+  const normalized = normalizeEmployeeName(name)
+  return normalized || `__raw__:${name.trim().toLowerCase()}`
 }
 
 // ---- Pay period date helpers ----------------------------------------------

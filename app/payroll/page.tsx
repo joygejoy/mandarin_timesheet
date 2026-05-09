@@ -98,10 +98,10 @@ function PeriodList({ rows }: { rows: PayPeriod[] }) {
 function StatusDot({ status }: { status: PayPeriod['status'] }) {
   const color =
     status === 'open'
-      ? 'bg-emerald-500'
+      ? 'bg-[color:var(--success)]'
       : status === 'closed'
       ? 'bg-zinc-400 dark:bg-zinc-600'
-      : 'bg-amber-500'
+      : 'bg-[color:var(--accent)]'
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-[color:var(--muted)]">
       <span className={`dot ${color}`} aria-hidden />

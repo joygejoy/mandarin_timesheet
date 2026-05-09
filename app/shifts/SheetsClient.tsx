@@ -170,9 +170,9 @@ function SheetTable({ rows }: { rows: SheetRow[] }) {
 function StatusDot({ status }: { status: DailySheet['status'] }) {
   const color =
     status === 'approved'
-      ? 'bg-emerald-500'
+      ? 'bg-[color:var(--success)]'
       : status === 'reviewing'
-      ? 'bg-amber-500'
+      ? 'bg-[color:var(--accent)]'
       : 'bg-zinc-400 dark:bg-zinc-600'
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-[color:var(--muted)]">

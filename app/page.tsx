@@ -1,4 +1,9 @@
 import Link from 'next/link'
+import { getOnboardingStatus } from './_onboarding/getOnboardingStatus'
+import { GettingStarted } from './_onboarding/GettingStarted'
+import { ShowWalkthroughButton } from './_onboarding/ShowWalkthroughButton'
+
+export const dynamic = 'force-dynamic'
 
 const QUICK_ACTIONS = [
   {
@@ -28,16 +33,23 @@ const QUICK_ACTIONS = [
   },
 ]
 
-export default function Home() {
+export default async function Home() {
+  const onboarding = await getOnboardingStatus()
+
   return (
     <div className="mx-auto max-w-2xl">
-      <header className="pb-10">
-        <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+      <header className="mb-10 rounded-xl bg-[color:var(--accent-tint)] px-5 py-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+          <ShowWalkthroughButton />
+        </div>
         <p className="mt-2 text-sm text-[color:var(--muted)]">
           Scan a sheet, review extracted shifts, approve, repeat. Roll into the current pay
           period when ready.
         </p>
       </header>
+
+      {onboarding && <GettingStarted status={onboarding} />}
 
       <nav className="divide-y divide-[color:var(--border)]">
         {QUICK_ACTIONS.map((a) => (

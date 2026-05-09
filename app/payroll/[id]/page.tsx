@@ -102,9 +102,12 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
       />
 
       <section className="mt-10">
-        <h2 className="mb-3 text-sm text-[color:var(--muted)]">
-          Per-employee summary (approved sheets only)
-        </h2>
+        <div className="mb-3 flex items-center gap-2 rounded-md bg-[color:var(--success-tint)] px-3 py-2">
+          <span className="dot bg-[color:var(--success)]" aria-hidden />
+          <h2 className="text-sm text-[color:var(--foreground)]">
+            Per-employee summary (approved sheets only)
+          </h2>
+        </div>
         {summary.rows.length === 0 ? (
           <p className="surface border-dashed p-8 text-center text-sm text-[color:var(--muted)]">
             {drafts.length > 0
@@ -189,9 +192,9 @@ function Calendar({
           const isApproved = approved.has(d)
           const isDraft = drafts.has(d)
           const dot = isApproved
-            ? 'bg-emerald-500'
+            ? 'bg-[color:var(--success)]'
             : isDraft
-            ? 'bg-amber-500'
+            ? 'bg-[color:var(--accent)]'
             : 'bg-transparent border border-[color:var(--border-strong)]'
           const cls = sheet
             ? 'surface hover:border-[color:var(--border-strong)]'
@@ -221,8 +224,8 @@ function Calendar({
         })}
       </div>
       <p className="mt-3 inline-flex items-center gap-3 text-xs text-[color:var(--muted)]">
-        <span className="inline-flex items-center gap-1.5"><span className="dot bg-emerald-500" /> approved</span>
-        <span className="inline-flex items-center gap-1.5"><span className="dot bg-amber-500" /> draft</span>
+        <span className="inline-flex items-center gap-1.5"><span className="dot bg-[color:var(--success)]" /> approved</span>
+        <span className="inline-flex items-center gap-1.5"><span className="dot bg-[color:var(--accent)]" /> draft</span>
         <span className="inline-flex items-center gap-1.5"><span className="dot border border-[color:var(--border-strong)]" /> no sheet</span>
       </p>
     </section>

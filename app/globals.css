@@ -8,7 +8,12 @@
   --muted: #6b6b6a;
   --border: #ebebe9;
   --border-strong: #d8d8d6;
-  --accent: #2563eb;
+  /* Mandarin Buffet brand — values pulled from mandarinrestaurant.com CSS. */
+  --accent: #f17fb2;        /* primary brand pink */
+  --accent-strong: #ec008c; /* darker pink (same site) for hover/pressed */
+  --success: #38803d;       /* .main-color from the site stylesheet */
+  --accent-tint: rgba(241, 127, 178, 0.10);
+  --success-tint: rgba(56, 128, 61, 0.10);
 }
 
 @theme inline {
@@ -19,6 +24,8 @@
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-success: var(--success);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -31,7 +38,12 @@
     --muted: #9b9b9b;
     --border: #2a2a2a;
     --border-strong: #3a3a3a;
-    --accent: #6ea8ff;
+    /* Same brand hexes work on dark bg — sufficient contrast. */
+    --accent: #f17fb2;
+    --accent-strong: #ec008c;
+    --success: #38803d;
+    --accent-tint: rgba(241, 127, 178, 0.14);
+    --success-tint: rgba(56, 128, 61, 0.16);
   }
 }
 
@@ -54,9 +66,9 @@ body {
 
 @utility btn-primary {
   @apply inline-flex items-center justify-center gap-1.5 rounded-md
-         bg-[color:var(--foreground)] px-3 py-1.5 text-sm font-medium
-         text-[color:var(--background)] transition
-         hover:opacity-85 disabled:opacity-50;
+         bg-[color:var(--accent-strong)] px-3 py-1.5 text-sm font-medium
+         text-white transition
+         hover:bg-[color:var(--accent)] disabled:opacity-50;
 }
 
 @utility btn-secondary {

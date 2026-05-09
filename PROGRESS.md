@@ -194,6 +194,49 @@ Other
       Standalone bundle confirmed at
       `node_modules/pdfkit/js/pdfkit.standalone.js`.
 
+Brand & navigation refresh
+- [x] **Mandarin Buffet brand palette** wired through `globals.css` —
+      `--accent` `#f17fb2`, `--accent-strong` `#ec008c`, `--success` `#38803d`,
+      plus `--accent-tint` / `--success-tint` for soft fills. Hexes verified
+      against `mandarinrestaurant.com` CSS, not invented. Replaces the generic
+      blue/emerald/amber set across `/payroll`, `/payroll/[id]`, `/shifts`,
+      and the dashboard. `btn-primary` now uses brand pink instead of the
+      foreground-on-background slab.
+- [x] **Sidebar polish** — bigger logo dot, heavier brand wordmark, active
+      item gets a left accent border and `--accent-tint` background instead
+      of the muted `bg-black/5` it had before.
+- [x] **Mobile nav** — new `app/_components/MobileNav.tsx` with sticky top bar,
+      hamburger → slide-out drawer, body-scroll lock, route-change auto-close.
+      Layout switches to `flex-col` under `md`. Sidebar stays desktop-only.
+      Adds `viewport: { viewportFit: 'cover' }` so the bar respects iOS
+      safe-area insets.
+
+Dashboard onboarding
+- [x] **6-step "Getting started" checklist** on `/` — `app/_onboarding/`
+      hits Supabase with six parallel `select id limit 1` reads to mark
+      `roster → scan → confirm → alcohol → approve → payroll` as done. Steps
+      are links, so each one is one click from the dashboard. localStorage
+      handles visibility (auto-shows on first visit, dismissible, with a
+      "Show walkthrough" button in the dashboard header to bring it back;
+      legacy `dismissed=1` flag migrated to the new state key on first mount).
+- [x] **Accent-tinted dashboard header** so the page reads as branded the
+      moment a manager lands on it.
+
+Payroll correctness
+- [x] **Biweekly grouping fix** in `lib/payroll.ts` — group key is now
+      `normalizeEmployeeName(name)` (the same dedupe key roster import uses),
+      so OCR rows with no `employee_id` collapse into the same row as
+      id-bearing shifts for the same person, and spelling variants
+      (`Lisa F` / `lisa  f.` / `Lísa-F`) merge. `ensureBiweeklyRow` now
+      back-fills `employee_id` when a later row has one but the seed didn't.
+      Same fix applies to alcohol sales aggregation.
+
+Cleanup
+- [x] **Daily-sheet detail no longer renders `ScanPhotoPanel`** — the lazy
+      photo dropdown was redundant once OCR review owns the photo step.
+- [x] **`next.config.ts`: `serverExternalPackages: ['pdfkit']`** — keeps the
+      PDF route from being bundled by Turbopack at build time.
+
 ### Not yet built
 
 - [ ] **Auth + RLS policies** so multiple managers can share the app safely.
