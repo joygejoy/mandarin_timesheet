@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { summarizePayPeriod, daysInRange } from '@/lib/payroll'
+import { PageHero } from '@/app/_components/PageHero'
 import { ClosePeriodForm } from './ClosePeriodForm'
 import { PushToSheetsButton } from './PushToSheetsButton'
 import type { PayPeriod, DailySheet, Shift, AlcoholSale } from '@/lib/types/db'
@@ -44,46 +45,51 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="mx-auto max-w-6xl">
-      <header className="pb-6">
-        <Link href="/payroll" className="text-sm text-[color:var(--muted)] hover:text-[color:var(--foreground)]">
-          ← Payroll
-        </Link>
-        <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">{fmtRange(period.start_date, period.end_date)}</h1>
-            <p className="mt-1 text-sm text-[color:var(--muted)]">
-              <span className="font-medium text-[color:var(--foreground)]">{period.status}</span> ·{' '}
-              {approved.length} approved / {sheets.length} sheet{sheets.length === 1 ? '' : 's'}
-              {drafts.length > 0 && (
-                <>
-                  {' · '}
-                  <span className="text-amber-700 dark:text-amber-400">
-                    {drafts.length} draft{drafts.length === 1 ? '' : 's'} pending
-                  </span>
-                </>
-              )}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+      <PageHero
+        eyebrow={`Pay period · ${period.status}`}
+        title={fmtRange(period.start_date, period.end_date)}
+        subtitle={
+          <>
+            <span className="font-medium text-[color:var(--foreground)] tabular-nums">
+              {approved.length}
+            </span>{' '}
+            approved of{' '}
+            <span className="tabular-nums">{sheets.length}</span> sheet
+            {sheets.length === 1 ? '' : 's'}
+            {drafts.length > 0 && (
+              <>
+                {' · '}
+                <span className="font-medium text-[color:var(--primary)] tabular-nums">
+                  {drafts.length}
+                </span>{' '}
+                draft{drafts.length === 1 ? '' : 's'} pending
+              </>
+            )}
+          </>
+        }
+        accent="green"
+        backLink={{ href: '/payroll', label: 'Payroll' }}
+        action={
+          <>
             <a
               href={`/api/payroll/${id}/csv`}
               className="btn-secondary"
               download={`payroll_${period.start_date}_${period.end_date}.csv`}
             >
-              Download CSV
+              CSV
             </a>
             <a
               href={`/api/payroll/${id}/pdf`}
               className="btn-secondary"
               download={`payroll_${period.start_date}_${period.end_date}.pdf`}
             >
-              Download PDF
+              PDF
             </a>
             <PushToSheetsButton periodId={id} />
             <ClosePeriodForm id={id} status={period.status} />
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <SummaryCards
         totalHours={summary.total_hours}
@@ -102,11 +108,11 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
       />
 
       <section className="mt-10">
-        <div className="mb-3 flex items-center gap-2 rounded-md bg-[color:var(--success-tint)] px-3 py-2">
-          <span className="dot bg-[color:var(--success)]" aria-hidden />
-          <h2 className="text-sm text-[color:var(--foreground)]">
-            Per-employee summary (approved sheets only)
-          </h2>
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h2 className="eyebrow-green">Per-employee summary</h2>
+          <span className="text-xs text-[color:var(--muted)]">
+            approved sheets only
+          </span>
         </div>
         {summary.rows.length === 0 ? (
           <p className="surface border-dashed p-8 text-center text-sm text-[color:var(--muted)]">
@@ -142,11 +148,21 @@ function SummaryCards({
       ? `gross $${totalGrossPay.toFixed(2)} − meals $${totalMealDeduction.toFixed(2)}`
       : `${employees} employee${employees === 1 ? '' : 's'}`
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <Card label="Total hours" value={totalHours.toFixed(2)} />
-      <Card label="Net pay (paid out)" value={`$${totalNetPay.toFixed(2)}`} subtitle={subtitle} />
+    <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <Card label="Total hours" value={totalHours.toFixed(2)} accent="pink" />
+      <Card
+        label="Net pay (paid out)"
+        value={`$${totalNetPay.toFixed(2)}`}
+        subtitle={subtitle}
+        accent="green"
+        emphasis
+      />
       <Card label="Employees on payroll" value={employees.toString()} />
-      <Card label="Alcohol points" value={alcoholPoints.toString()} />
+      <Card
+        label="Alcohol points"
+        value={alcoholPoints.toString()}
+        accent="pink"
+      />
     </div>
   )
 }
@@ -155,15 +171,47 @@ function Card({
   label,
   value,
   subtitle,
+  accent,
+  emphasis,
 }: {
   label: string
   value: string
   subtitle?: string
+  accent?: 'pink' | 'green'
+  emphasis?: boolean
 }) {
+  const railColor =
+    accent === 'green'
+      ? 'bg-[color:var(--tertiary)]'
+      : accent === 'pink'
+      ? 'bg-[color:var(--primary)]'
+      : 'bg-transparent'
   return (
-    <div className="surface p-4">
+    <div
+      className={
+        'surface relative overflow-hidden p-4 ' +
+        (emphasis
+          ? 'shadow-[0_8px_24px_-12px_rgba(56,128,61,0.18)]'
+          : '')
+      }
+    >
+      {accent && (
+        <span
+          aria-hidden="true"
+          className={`absolute left-0 top-3 h-6 w-0.5 rounded-full ${railColor}`}
+        />
+      )}
       <p className="text-xs text-[color:var(--muted)]">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
+      <p
+        className={
+          'mt-1 tabular-nums ' +
+          (emphasis
+            ? 'text-3xl font-semibold text-[color:var(--tertiary)]'
+            : 'text-2xl font-semibold')
+        }
+      >
+        {value}
+      </p>
       {subtitle && (
         <p className="mt-1 text-[11px] text-[color:var(--muted)]">{subtitle}</p>
       )}
@@ -184,8 +232,8 @@ function Calendar({
 }) {
   const sheetByDate = new Map(sheets.map((s) => [s.sheet_date, s]))
   return (
-    <section className="mt-8">
-      <h2 className="mb-3 text-sm text-[color:var(--muted)]">Days in this period</h2>
+    <section className="mt-10">
+      <h2 className="eyebrow mb-3">Days in this period</h2>
       <div className="flex flex-wrap gap-1.5">
         {dates.map((d) => {
           const sheet = sheetByDate.get(d)

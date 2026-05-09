@@ -1,7 +1,7 @@
-import Link from 'next/link'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { isOpenAIConfigured } from '@/lib/openai'
 import { SetupRequired } from '@/app/_components/SetupRequired'
+import { PageHero } from '@/app/_components/PageHero'
 import { ScanClient } from './ScanClient'
 import type { Employee } from '@/lib/types/db'
 
@@ -34,15 +34,12 @@ export default async function ScanPage() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto max-w-7xl">
-      <header className="pb-8">
-        <Link href="/shifts" className="text-sm text-[color:var(--muted)] hover:text-[color:var(--foreground)]">
-          ← Daily shifts
-        </Link>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Scan a daily sheet</h1>
-        <p className="mt-1 text-sm text-[color:var(--muted)]">
-          Upload a photo, GPT-4o extracts shifts, you correct anything fuzzy, then approve into a daily sheet.
-        </p>
-      </header>
+      <PageHero
+        eyebrow="Daily · Scan"
+        title="Scan a daily sheet"
+        subtitle="Upload a photo, GPT-4o extracts shifts, you correct anything fuzzy, then approve into a daily sheet."
+        backLink={{ href: '/shifts', label: 'Daily shifts' }}
+      />
       {children}
     </div>
   )
@@ -50,9 +47,10 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function OpenAINotice() {
   return (
-    <div className="mb-6 surface border-l-2 border-l-amber-500 p-4 text-sm">
+    <div className="surface mb-6 border-l-4 border-l-[color:var(--primary)] p-4 text-sm">
+      <p className="eyebrow mb-1">Setup needed</p>
       <p className="font-medium">OpenAI key missing.</p>
-      <p className="mt-1">
+      <p className="mt-1 text-[color:var(--muted)]">
         Add <code>OPENAI_API_KEY</code> to <code>.env.local</code> and restart the dev server.
         Each scan costs roughly $0.01 on gpt-4o.
       </p>

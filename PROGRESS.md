@@ -237,6 +237,50 @@ Cleanup
 - [x] **`next.config.ts`: `serverExternalPackages: ['pdfkit']`** — keeps the
       PDF route from being bundled by Turbopack at build time.
 
+Restrained-MD3 design system
+- [x] **MD3 token aliases keyed to Mandarin palette** — `--primary`
+      (`#ec008c`), `--primary-container`, `--tertiary` (`--success` green),
+      `--surface-container`, `--surface-container-low`, `--outline`,
+      plus `--ease-md` cubic-bezier and `--duration-md`. Surfaced as
+      Tailwind `--color-*` tokens in `@theme inline`.
+- [x] **MD3 utilities** — `btn-primary` (pink pill), `btn-secondary`
+      (outlined pill), `btn-tertiary` (green pill, used on "Create period"
+      and other affirmative actions), `btn-ghost` (transparent pill);
+      all with state layers (`bg-primary/90` hover, `/80` active),
+      `active:scale-95`, focus-visible rings, explicit transitions
+      (no more `transition: all`). `input` rewritten to MD3 filled style
+      (rounded top, 2px bottom border, surface-container-low fill).
+      `surface` → `rounded-2xl` (16px). `dot` → 8px.
+- [x] **`color-scheme: light` / `: dark`** declarations + global
+      `prefers-reduced-motion` handler. Closes Vercel Web Interface
+      Guidelines violations on dark-mode scrollbars and motion sensitivity.
+- [x] **`<meta name="theme-color">`** wired through `viewport` export.
+- [x] **Shared `app/_components/PageHero.tsx`** — eyebrow + h1 + subtitle +
+      optional action cluster + back link, with a dual-color blur-shape
+      atmosphere behind every page (pink-dominant or green-dominant per
+      `accent` prop; both colors always present so every page reads as
+      co-branded). Replaces 7 inconsistent header blocks.
+- [x] **Pages migrated to `PageHero`** — `/`, `/payroll`, `/payroll/[id]`,
+      `/shifts`, `/scan`, `/employees`, `/alcohol`. `/scan` uses the
+      built-in back link to `/shifts`.
+- [x] **Dashboard quick-actions redesigned** — 2-column card grid, each
+      card has an accent rail that scales-up on hover, a pink/green shadow
+      glow on hover, and an "Open →" footer that gaps wider on hover. Card
+      accent alternates pink (Daily) and green (Periodic / Setup / Alcohol)
+      so the brand palette feels intentional rather than incidental.
+- [x] **Onboarding checklist visual polish** — pink→green gradient
+      progress strip across the top, numbered steps, larger green-shadowed
+      check indicators when done, pink ring + dot indicator on the "next"
+      step.
+- [x] **Payroll detail summary cards** — "Net pay" is now the visual hero:
+      green left rail, green-tinted value, green ambient glow. Other cards
+      get pink rails (Total hours, Alcohol points) or no rail (Employees).
+- [x] **Alcohol podium** — 1st place gets a green ring + green-emphasized
+      value + green ambient glow (replaces the prior amber accent).
+- [x] **Drop Fraunces** — first design pass tried a serif display face
+      (Fraunces); the user explicitly preferred plain Geist. Display
+      typography removed. Character now lives in layout, color, and motion.
+
 ### Not yet built
 
 - [ ] **Auth + RLS policies** so multiple managers can share the app safely.

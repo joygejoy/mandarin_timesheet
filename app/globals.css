@@ -14,6 +14,26 @@
   --success: #38803d;       /* .main-color from the site stylesheet */
   --accent-tint: rgba(241, 127, 178, 0.10);
   --success-tint: rgba(56, 128, 61, 0.10);
+
+  /* MD3 token aliases keyed to the Mandarin palette. Restrained: pink seed,
+     green tertiary, no pastel-tonal default surfaces. */
+  --primary: var(--accent-strong);          /* #ec008c */
+  --on-primary: #ffffff;
+  --primary-container: #fce4f0;             /* tinted pink for chips/active rails */
+  --on-primary-container: #3d0026;
+  --tertiary: var(--success);                /* #38803d */
+  --on-tertiary: #ffffff;
+  --surface-container: #f5f3f0;             /* one step darker than --background */
+  --surface-container-low: #f0eee9;         /* recessed (inputs) */
+  --outline: #79747e;                        /* MD3 outline */
+  --on-surface-variant: #49454f;             /* secondary text */
+
+  /* MD3 motion */
+  --ease-md: cubic-bezier(0.2, 0, 0, 1);
+  --duration-md: 300ms;
+  --duration-md-fast: 200ms;
+
+  color-scheme: light;
 }
 
 @theme inline {
@@ -26,6 +46,16 @@
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-success: var(--success);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-primary-container: var(--primary-container);
+  --color-on-primary-container: var(--on-primary-container);
+  --color-tertiary: var(--tertiary);
+  --color-on-tertiary: var(--on-tertiary);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-outline: var(--outline);
+  --color-on-surface-variant: var(--on-surface-variant);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -44,6 +74,26 @@
     --success: #38803d;
     --accent-tint: rgba(241, 127, 178, 0.14);
     --success-tint: rgba(56, 128, 61, 0.16);
+
+    --primary-container: #4a0029;
+    --on-primary-container: #ffd9e7;
+    --surface-container: #232323;
+    --surface-container-low: #1c1c1c;
+    --outline: #938f99;
+    --on-surface-variant: #cac4d0;
+
+    color-scheme: dark;
+  }
+}
+
+/* Honor reduced-motion globally. Every transition/animation collapses; users
+   with vestibular sensitivities still get the layout, just no movement. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -53,58 +103,167 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ---- Form controls ---- */
+/* ---- MD3 easing helper ---- */
 
-@utility input {
-  @apply w-full rounded-md border border-[color:var(--border-strong)] bg-[color:var(--surface)]
-         px-2.5 py-1.5 text-sm outline-none transition
-         placeholder:text-[color:var(--muted)]
-         focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent)]/15;
+@utility ease-md {
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
-/* ---- Buttons ---- */
+/* ---- Eyebrow label: tiny tracked uppercase, sits above hero h1s.
+        Default color is pink; pass `eyebrow-green` to swap to tertiary. ---- */
+
+@utility eyebrow {
+  @apply text-[11px] font-semibold uppercase tracking-[0.18em]
+         text-[color:var(--primary)];
+  font-feature-settings: 'tnum';
+}
+
+@utility eyebrow-green {
+  @apply text-[11px] font-semibold uppercase tracking-[0.18em]
+         text-[color:var(--tertiary)];
+  font-feature-settings: 'tnum';
+}
+
+/* ---- Decorative blur shape — page-level atmosphere. Always pair with
+        `aria-hidden="true"` and `pointer-events-none`. ---- */
+
+@utility blur-shape {
+  @apply pointer-events-none absolute rounded-full blur-3xl;
+}
+
+/* ---- Green tertiary button (approve / save / publish actions).
+        Pairs visually with btn-primary (pink); use one per page. ---- */
+
+@utility btn-tertiary {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-full
+         bg-[color:var(--tertiary)] px-4 py-1.5 text-sm font-medium
+         text-[color:var(--on-tertiary)]
+         transition-[background-color,box-shadow,transform]
+         duration-200 ease-[cubic-bezier(0.2,0,0,1)]
+         hover:bg-[color:var(--tertiary)]/90 hover:shadow-md
+         active:bg-[color:var(--tertiary)]/80 active:scale-95
+         focus-visible:outline-none focus-visible:ring-2
+         focus-visible:ring-[color:var(--tertiary)] focus-visible:ring-offset-2
+         focus-visible:ring-offset-[color:var(--background)]
+         disabled:opacity-50 disabled:pointer-events-none;
+}
+
+/* ---- Surface variant for "approved/done" cards: green left rail. ---- */
+
+@utility surface-success {
+  @apply rounded-2xl border border-[color:var(--border)]
+         border-l-4 border-l-[color:var(--tertiary)]
+         bg-[color:var(--surface)];
+}
+
+/* ---- Form controls (MD3 filled text field) ----
+   Rounded top, square bottom, 2px outline-colored bottom border that becomes
+   primary on focus. Surface-container-low fill to read as recessed. */
+
+@utility input {
+  @apply w-full rounded-t-lg border-b-2 border-[color:var(--outline)]
+         bg-[color:var(--surface-container-low)]
+         px-3 py-2 text-sm outline-none
+         transition-colors duration-200 ease-[cubic-bezier(0.2,0,0,1)]
+         placeholder:text-[color:var(--muted)]
+         hover:bg-[color:var(--surface-container)]
+         focus:border-[color:var(--primary)]
+         focus-visible:ring-2 focus-visible:ring-[color:var(--primary)]/30;
+}
+
+/* ---- Buttons (pill-shaped, MD3 state layers + tactile feedback) ---- */
 
 @utility btn-primary {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-md
-         bg-[color:var(--accent-strong)] px-3 py-1.5 text-sm font-medium
-         text-white transition
-         hover:bg-[color:var(--accent)] disabled:opacity-50;
+  @apply inline-flex items-center justify-center gap-1.5 rounded-full
+         bg-[color:var(--primary)] px-4 py-1.5 text-sm font-medium
+         text-[color:var(--on-primary)]
+         transition-[background-color,box-shadow,transform]
+         duration-200 ease-[cubic-bezier(0.2,0,0,1)]
+         hover:bg-[color:var(--primary)]/90 hover:shadow-md
+         active:bg-[color:var(--primary)]/80 active:scale-95
+         focus-visible:outline-none focus-visible:ring-2
+         focus-visible:ring-[color:var(--primary)] focus-visible:ring-offset-2
+         focus-visible:ring-offset-[color:var(--background)]
+         disabled:opacity-50 disabled:pointer-events-none;
 }
 
 @utility btn-secondary {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-md border
-         border-[color:var(--border-strong)] bg-[color:var(--surface)]
-         px-3 py-1.5 text-sm font-medium text-[color:var(--foreground)]
-         transition hover:bg-black/5 dark:hover:bg-white/5
-         disabled:opacity-50;
+  /* Outlined variant — restrained, won't drown data-dense pages in pink */
+  @apply inline-flex items-center justify-center gap-1.5 rounded-full
+         border border-[color:var(--outline)] bg-transparent
+         px-4 py-1.5 text-sm font-medium text-[color:var(--foreground)]
+         transition-[background-color,box-shadow,transform]
+         duration-200 ease-[cubic-bezier(0.2,0,0,1)]
+         hover:bg-[color:var(--primary)]/5
+         active:scale-95
+         focus-visible:outline-none focus-visible:ring-2
+         focus-visible:ring-[color:var(--primary)] focus-visible:ring-offset-2
+         focus-visible:ring-offset-[color:var(--background)]
+         disabled:opacity-50 disabled:pointer-events-none;
+}
+
+@utility btn-tonal {
+  /* Pink-container fill — for accented secondary actions where outline feels
+     too quiet. Use sparingly. */
+  @apply inline-flex items-center justify-center gap-1.5 rounded-full
+         bg-[color:var(--primary-container)] px-4 py-1.5 text-sm font-medium
+         text-[color:var(--on-primary-container)]
+         transition-[background-color,box-shadow,transform]
+         duration-200 ease-[cubic-bezier(0.2,0,0,1)]
+         hover:bg-[color:var(--primary-container)]/85
+         active:scale-95
+         focus-visible:outline-none focus-visible:ring-2
+         focus-visible:ring-[color:var(--primary)] focus-visible:ring-offset-2
+         focus-visible:ring-offset-[color:var(--background)]
+         disabled:opacity-50 disabled:pointer-events-none;
 }
 
 @utility btn-ghost {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-md
-         px-2 py-1 text-sm text-[color:var(--muted)]
-         transition hover:bg-black/5 hover:text-[color:var(--foreground)]
-         dark:hover:bg-white/5 disabled:opacity-50;
+  @apply inline-flex items-center justify-center gap-1.5 rounded-full
+         px-3 py-1 text-sm text-[color:var(--muted)]
+         transition-[background-color,color,transform]
+         duration-200 ease-[cubic-bezier(0.2,0,0,1)]
+         hover:bg-[color:var(--primary)]/10 hover:text-[color:var(--foreground)]
+         active:scale-95
+         focus-visible:outline-none focus-visible:ring-2
+         focus-visible:ring-[color:var(--primary)] focus-visible:ring-offset-2
+         focus-visible:ring-offset-[color:var(--background)]
+         disabled:opacity-50 disabled:pointer-events-none;
 }
 
 /* ---- Surfaces ---- */
 
 @utility surface {
-  @apply rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)];
+  /* Restrained MD3: 16px radius, hairline border, white surface (NOT pastel
+     tonal — keeps data-dense tables readable). */
+  @apply rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)];
 }
 
 @utility hairline {
   @apply border-[color:var(--border)];
 }
 
-/* ---- Status dot ---- */
+/* ---- Status dot (8px, MD3 weight) ---- */
 
 @utility dot {
-  @apply inline-block h-1.5 w-1.5 rounded-full;
+  @apply inline-block h-2 w-2 rounded-full;
 }
 
 /* ---- Subtle link underline on hover ---- */
 
 @utility link-soft {
-  @apply text-[color:var(--foreground)] underline-offset-4 transition
-         hover:underline hover:decoration-[color:var(--border-strong)];
+  @apply text-[color:var(--foreground)] underline-offset-4
+         transition-[text-decoration-color,color] duration-200 ease-[cubic-bezier(0.2,0,0,1)]
+         hover:underline hover:decoration-[color:var(--border-strong)]
+         focus-visible:outline-none focus-visible:underline
+         focus-visible:decoration-[color:var(--primary)];
+}
+
+/* ---- Focus ring helper for non-button interactive surfaces (link cards,
+        list rows). Use alongside `outline-none`. ---- */
+
+@utility focus-ring {
+  @apply focus-visible:outline-none focus-visible:ring-2
+         focus-visible:ring-[color:var(--primary)] focus-visible:ring-offset-2
+         focus-visible:ring-offset-[color:var(--background)];
 }

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { SetupRequired } from '@/app/_components/SetupRequired'
+import { PageHero } from '@/app/_components/PageHero'
 import { summarizePayPeriod } from '@/lib/payroll'
 import type { PayPeriod, DailySheet, AlcoholSale } from '@/lib/types/db'
 
@@ -16,7 +17,11 @@ export default async function AlcoholPage({
   if (!isSupabaseConfigured()) {
     return (
       <div className="mx-auto max-w-4xl">
-        <h1 className="pb-6 text-2xl font-semibold tracking-tight">Alcohol sales</h1>
+        <PageHero
+          eyebrow="Daily · Alcohol"
+          title="Alcohol sales"
+          accent="green"
+        />
         <SetupRequired />
       </div>
     )
@@ -60,16 +65,21 @@ export default async function AlcoholPage({
 
   return (
     <div className="mx-auto max-w-5xl">
-      <header className="pb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">Alcohol sales</h1>
-        <p className="mt-1 text-sm text-[color:var(--muted)]">
-          Drink-point leaderboard for a pay period. Enter daily totals on each day's sheet at{' '}
-          <Link href="/shifts" className="link-soft">
-            Daily shifts
-          </Link>
-          .
-        </p>
-      </header>
+      <PageHero
+        eyebrow="Daily · Alcohol"
+        title="Alcohol sales"
+        subtitle={
+          <>
+            Drink-point leaderboard for a pay period. Enter daily totals on each
+            day&rsquo;s sheet at{' '}
+            <Link href="/shifts" className="link-soft">
+              Daily shifts
+            </Link>
+            .
+          </>
+        }
+        accent="green"
+      />
 
       {periodList.length === 0 ? (
         <NoPeriods />
@@ -123,26 +133,60 @@ function Podium({
 }: {
   ranked: { employee_name: string; alcohol_points: number }[]
 }) {
-  // Order on screen left→right: 2nd, 1st, 3rd. (Classic podium).
-  const slots: { rank: number; row?: (typeof ranked)[number]; medal: string; height: string; emphasis: string }[] = [
-    { rank: 2, row: ranked[1], medal: '2nd', height: 'h-28', emphasis: '' },
-    { rank: 1, row: ranked[0], medal: '1st', height: 'h-36', emphasis: 'ring-1 ring-amber-400/70' },
-    { rank: 3, row: ranked[2], medal: '3rd', height: 'h-24', emphasis: '' },
+  // Order on screen left→right: 2nd, 1st, 3rd (classic podium).
+  // 1st gets the green ring + tertiary emphasis; runners-up are quieter.
+  const slots: {
+    rank: number
+    row?: (typeof ranked)[number]
+    medal: string
+    height: string
+    emphasis: string
+    valueColor: string
+  }[] = [
+    {
+      rank: 2,
+      row: ranked[1],
+      medal: '2nd',
+      height: 'h-28',
+      emphasis: '',
+      valueColor: 'text-[color:var(--foreground)]',
+    },
+    {
+      rank: 1,
+      row: ranked[0],
+      medal: '1st',
+      height: 'h-36',
+      emphasis:
+        'ring-2 ring-[color:var(--tertiary)] shadow-[0_12px_32px_-12px_rgba(56,128,61,0.3)]',
+      valueColor: 'text-[color:var(--tertiary)]',
+    },
+    {
+      rank: 3,
+      row: ranked[2],
+      medal: '3rd',
+      height: 'h-24',
+      emphasis: '',
+      valueColor: 'text-[color:var(--foreground)]',
+    },
   ]
   return (
     <section className="mb-8">
-      <h2 className="mb-3 text-sm text-[color:var(--muted)]">Top sellers</h2>
+      <h2 className="eyebrow-green mb-3">Top sellers</h2>
       <div className="grid grid-cols-3 items-end gap-3">
-        {slots.map(({ rank, row, medal, height, emphasis }) => (
+        {slots.map(({ rank, row, medal, height, emphasis, valueColor }) => (
           <div
             key={rank}
             className={`surface flex ${height} flex-col items-center justify-end p-3 text-center ${emphasis}`}
           >
             {row ? (
               <>
-                <span className="text-xs uppercase tracking-wide text-[color:var(--muted)]">{medal}</span>
+                <span className="text-xs uppercase tracking-wide text-[color:var(--muted)]">
+                  {medal}
+                </span>
                 <p className="mt-2 text-sm font-medium">{row.employee_name}</p>
-                <p className="text-lg font-semibold tabular-nums">{row.alcohol_points} pts</p>
+                <p className={`text-lg font-semibold tabular-nums ${valueColor}`}>
+                  {row.alcohol_points} pts
+                </p>
               </>
             ) : (
               <span className="text-xs text-[color:var(--muted)]">—</span>
@@ -164,7 +208,7 @@ function Table({
 }) {
   return (
     <section>
-      <h2 className="mb-3 text-sm text-[color:var(--muted)]">Full ranking</h2>
+      <h2 className="eyebrow mb-3">Full ranking</h2>
       <div className="surface overflow-hidden">
         <table className="min-w-full text-sm">
           <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">

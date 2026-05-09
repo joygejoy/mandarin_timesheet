@@ -1,5 +1,6 @@
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { SetupRequired } from '@/app/_components/SetupRequired'
+import { PageHero } from '@/app/_components/PageHero'
 import { isoDate, summarizeDay } from '@/lib/payroll'
 import { createDailySheet } from './actions'
 import { SheetsClient, type SheetRow } from './SheetsClient'
@@ -13,7 +14,7 @@ export default async function ShiftsPage() {
   if (!isSupabaseConfigured()) {
     return (
       <div className="mx-auto max-w-4xl">
-        <h1 className="pb-6 text-2xl font-semibold tracking-tight">Daily shifts</h1>
+        <PageHero eyebrow="Daily · Shifts" title="Daily shifts" />
         <SetupRequired />
       </div>
     )
@@ -46,18 +47,16 @@ export default async function ShiftsPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <header className="pb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">Daily shifts</h1>
-        <p className="mt-1 text-sm text-[color:var(--muted)]">
-          One sheet per calendar day. Open today below, or jump to any past date — sheets
-          are created on first open.
-        </p>
-      </header>
+      <PageHero
+        eyebrow="Daily · Shifts"
+        title="Daily shifts"
+        subtitle="One sheet per calendar day. Open today below, or jump to any past date — sheets are created on first open."
+      />
 
       <OpenDayPanel today={today} todaySheetId={todaySheetId} />
 
       <section className="mt-10">
-        <h2 className="mb-3 text-sm font-medium text-[color:var(--muted)]">All daily sheets</h2>
+        <h2 className="eyebrow mb-3">All daily sheets</h2>
         <SheetsClient sheets={rows} />
       </section>
     </div>
@@ -73,10 +72,11 @@ function OpenDayPanel({
 }) {
   return (
     <section className="surface p-5">
-      <h2 className="text-base font-semibold">Open a day</h2>
-      <p className="mt-1 text-xs text-[color:var(--muted)]">
+      <p className="eyebrow mb-1.5">Today</p>
+      <h2 className="text-lg font-semibold leading-tight">Open a day</h2>
+      <p className="mt-1.5 text-xs text-[color:var(--muted)]">
         Click <strong>Open today</strong> for {fmtDateLong(today)}, or pick any other date and click{' '}
-        <strong>Open</strong>. If a sheet already exists for that date you'll jump to it; otherwise a new draft is created.
+        <strong>Open</strong>. If a sheet already exists for that date you&rsquo;ll jump to it; otherwise a new draft is created.
       </p>
 
       <div className="mt-4 flex flex-wrap items-end gap-4">
@@ -84,7 +84,7 @@ function OpenDayPanel({
         <form action={createDailySheet}>
           <input type="hidden" name="sheet_date" value={today} />
           <button className="btn-primary" type="submit">
-            {todaySheetId ? '→ Open today' : '+ Open today'}
+            {todaySheetId ? 'Open today →' : '+ Open today'}
           </button>
         </form>
 
