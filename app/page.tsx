@@ -19,7 +19,7 @@ const QUICK_ACTIONS = [
   {
     href: '/payroll',
     title: 'Biweekly payroll',
-    body: 'Roll approved days into a pay period and export to Sheets/CSV.',
+    body: 'Roll approved days into a pay period and export to Sheets, CSV, or PDF.',
   },
   {
     href: '/employees',
@@ -30,26 +30,32 @@ const QUICK_ACTIONS = [
 
 export default function Home() {
   return (
-    <div className="mx-auto max-w-5xl">
-      <header className="pb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Scan a sheet, review extracted shifts, approve, repeat. Roll into the current pay period when ready.
+    <div className="mx-auto max-w-2xl">
+      <header className="pb-10">
+        <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="mt-2 text-sm text-[color:var(--muted)]">
+          Scan a sheet, review extracted shifts, approve, repeat. Roll into the current pay
+          period when ready.
         </p>
       </header>
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <nav className="divide-y divide-[color:var(--border)]">
         {QUICK_ACTIONS.map((a) => (
           <Link
             key={a.href}
             href={a.href}
-            className="group block rounded-lg border border-zinc-200 bg-white p-5 transition hover:border-zinc-400 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600"
+            className="group flex items-baseline justify-between gap-4 py-4 transition hover:opacity-80"
           >
-            <h2 className="text-base font-medium group-hover:underline">{a.title}</h2>
-            <p className="mt-1 text-sm text-zinc-500">{a.body}</p>
+            <div>
+              <h2 className="text-base font-medium group-hover:underline">{a.title}</h2>
+              <p className="mt-0.5 text-sm text-[color:var(--muted)]">{a.body}</p>
+            </div>
+            <span className="shrink-0 text-[color:var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[color:var(--foreground)]">
+              →
+            </span>
           </Link>
         ))}
-      </section>
+      </nav>
     </div>
   )
 }

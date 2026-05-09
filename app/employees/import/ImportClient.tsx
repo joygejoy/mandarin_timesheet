@@ -4,6 +4,9 @@ import { useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { bulkImportEmployees, type BulkImportResult } from './actions'
+import { normalizeEmployeeName } from '@/lib/normalize'
+import { WageSelect } from '@/app/_components/WageSelect'
+import { DEFAULT_WAGE_RATE, ONTARIO_WAGE_PRESETS } from '@/lib/wages'
 
 type Candidate = {
   id: string                    // local-only client id
@@ -34,7 +37,7 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
   const [result, setResult] = useState<BulkImportResult | null>(null)
   const [, startTransition] = useTransition()
 
-  const existingLower = new Set(existingNames.map((n) => n.toLowerCase()))
+  const existingKeys = new Set(existingNames.map(normalizeEmployeeName))
 
   async function onFileChosen(file: File) {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -71,13 +74,13 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
         include: true,
         full_name: e.name.trim(),
         role: e.role?.trim() ?? '',
-        hourly_rate: 17.5,
+        hourly_rate: DEFAULT_WAGE_RATE,
         age: '',
         default_break_minutes: 0,
         default_meal_provided: false,
         confidence: e.confidence,
         source_note: e.source_note,
-        duplicateOfExisting: existingLower.has(e.name.trim().toLowerCase()),
+        duplicateOfExisting: existingKeys.has(normalizeEmployeeName(e.name)),
       }))
     )
     setStep('review')
@@ -130,13 +133,17 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
   if (step === 'done' && result) {
     return (
       <div className="space-y-4">
-        <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-5 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+        <div className="surface border-l-2 border-l-emerald-500 p-4 text-sm">
           <p className="font-medium">Imported {result.inserted} employee{result.inserted === 1 ? '' : 's'}.</p>
           {result.skippedDuplicates.length > 0 && (
-            <p className="mt-2">Skipped {result.skippedDuplicates.length} duplicate(s): {result.skippedDuplicates.join(', ')}</p>
+            <p className="mt-2 text-[color:var(--muted)]">
+              Skipped {result.skippedDuplicates.length} duplicate{result.skippedDuplicates.length === 1 ? '' : 's'}: {result.skippedDuplicates.join(', ')}
+            </p>
           )}
           {result.errors.length > 0 && (
-            <p className="mt-2">Errors: {result.errors.map((e) => `${e.name}: ${e.message}`).join('; ')}</p>
+            <p className="mt-2 text-rose-700 dark:text-rose-300">
+              Errors: {result.errors.map((e) => `${e.name}: ${e.message}`).join('; ')}
+            </p>
           )}
         </div>
         <div className="flex gap-3">
@@ -157,17 +164,23 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
       />
 
       {error && (
-        <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+        <div className="rounded-md border border-rose-200 bg-rose-50/60 p-3 text-sm text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
           {error}
         </div>
       )}
 
       {step === 'review' && (
         <div className="space-y-4">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Review the extracted names. Untick rows you don't want. Default rate is $17.50.
-            Yellow rows are low confidence; pink rows are already in your roster.
+          <p className="text-sm text-[color:var(--muted)]">
+            Review the extracted names. Untick rows you don't want. Default rate is Ontario
+            minimum wage ($17.60) — pick Student wage ($16.60) per row if applicable.
+            Amber rows are low confidence; rose rows are already in your roster.
           </p>
+          <BatchWageControls
+            onSetAll={(r) =>
+              setCandidates((cs) => cs.map((c) => ({ ...c, hourly_rate: r })))
+            }
+          />
           <CandidateTable rows={candidates} onChange={updateCandidate} />
           <div className="flex items-center gap-3 pt-2">
             <button onClick={onSave} className="btn-primary">
@@ -194,38 +207,38 @@ function UploadCard({
 }) {
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Sheet image</label>
+      <div className="surface p-4">
+        <label className="block text-xs text-[color:var(--muted)]">Sheet</label>
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*,text/csv,text/plain,text/tab-separated-values,application/pdf,.csv,.tsv,.txt,.pdf,.xls,.xlsx"
           disabled={step === 'extracting' || step === 'saving'}
-          className="mt-3 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-700 dark:file:bg-zinc-100 dark:file:text-zinc-900 dark:hover:file:bg-zinc-300"
+          className="mt-2 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[color:var(--foreground)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[color:var(--background)] hover:file:opacity-85"
           onChange={(e) => {
             const f = e.target.files?.[0]
             if (f) onFileChosen(f)
           }}
         />
-        <p className="mt-3 text-xs text-zinc-500">
+        <p className="mt-3 text-xs text-[color:var(--muted)]">
           Image (JPG/PNG/HEIC) → GPT-4o vision · CSV / TSV / TXT / PDF / XLS / XLSX → parsed
-          directly, no OCR cost. Up to 10 MB. Scanned PDFs without a text layer won’t work —
+          directly, no OCR cost. Up to 10 MB. Scanned PDFs without a text layer won't work —
           screenshot a page instead.
         </p>
         {step === 'extracting' && (
-          <p className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-            <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-zinc-400" />
+          <p className="mt-3 inline-flex items-center gap-2 text-sm text-[color:var(--muted)]">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[color:var(--accent)]" />
             Reading the sheet… (this takes 5–15 seconds)
           </p>
         )}
       </div>
-      <div className="rounded-lg border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="surface p-2">
         {previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={previewUrl} alt="Sheet preview" className="max-h-80 w-full rounded object-contain" />
         ) : (
-          <div className="flex h-full min-h-40 items-center justify-center px-3 text-center text-xs text-zinc-400">
-            Image preview appears here. Text files don’t preview — names show up below.
+          <div className="flex h-full min-h-40 items-center justify-center px-3 text-center text-xs text-[color:var(--muted)]">
+            Image preview appears here. Text files don't preview — names show up below.
           </div>
         )}
       </div>
@@ -241,27 +254,27 @@ function CandidateTable({
   onChange: (id: string, patch: Partial<Candidate>) => void
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="surface overflow-x-auto">
       <table className="min-w-full text-sm">
-        <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-800/50">
+        <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
           <tr>
-            <th className="w-10 px-3 py-3"></th>
-            <th className="px-3 py-3 font-medium">Name</th>
-            <th className="px-3 py-3 font-medium">Role</th>
-            <th className="px-3 py-3 font-medium">Rate</th>
-            <th className="px-3 py-3 font-medium">Age</th>
-            <th className="px-3 py-3 font-medium">Break</th>
-            <th className="px-3 py-3 font-medium">Meal</th>
-            <th className="px-3 py-3 font-medium">Source</th>
+            <th className="w-10 px-3 py-2.5"></th>
+            <th className="px-3 py-2.5 font-normal">Name</th>
+            <th className="px-3 py-2.5 font-normal">Role</th>
+            <th className="px-3 py-2.5 font-normal">Rate</th>
+            <th className="px-3 py-2.5 font-normal">Age</th>
+            <th className="px-3 py-2.5 font-normal">Break</th>
+            <th className="px-3 py-2.5 font-normal">Meal</th>
+            <th className="px-3 py-2.5 font-normal">Source</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <tbody className="divide-y divide-[color:var(--border)]">
           {rows.map((c) => {
             const lowConf = c.confidence < 0.7
             const rowClass = c.duplicateOfExisting
-              ? 'bg-rose-50 dark:bg-rose-950/30'
+              ? 'bg-rose-50/40 dark:bg-rose-950/15'
               : lowConf
-              ? 'bg-amber-50 dark:bg-amber-950/30'
+              ? 'bg-amber-50/40 dark:bg-amber-950/15'
               : ''
             return (
               <tr key={c.id} className={rowClass}>
@@ -296,14 +309,21 @@ function CandidateTable({
                   />
                 </td>
                 <td className="px-3 py-2 align-top">
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={c.hourly_rate}
-                    onChange={(e) => onChange(c.id, { hourly_rate: Number(e.target.value) })}
-                  />
+                  <div className="flex flex-col gap-1">
+                    <WageSelect
+                      rate={c.hourly_rate}
+                      onChange={({ rate }) => onChange(c.id, { hourly_rate: rate })}
+                      className="text-xs"
+                    />
+                    <input
+                      className="input w-24 text-right tabular-nums"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={c.hourly_rate}
+                      onChange={(e) => onChange(c.id, { hourly_rate: Number(e.target.value) })}
+                    />
+                  </div>
                 </td>
                 <td className="px-3 py-2 align-top">
                   <input
@@ -336,6 +356,28 @@ function CandidateTable({
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function BatchWageControls({ onSetAll }: { onSetAll: (rate: number) => void }) {
+  return (
+    <div className="surface flex flex-wrap items-center gap-3 p-3 text-sm">
+      <span className="text-[color:var(--muted)]">Set every row to:</span>
+      <button
+        type="button"
+        onClick={() => onSetAll(ONTARIO_WAGE_PRESETS.minimum.rate)}
+        className="btn-secondary text-xs"
+      >
+        {ONTARIO_WAGE_PRESETS.minimum.label} ${ONTARIO_WAGE_PRESETS.minimum.rate.toFixed(2)}
+      </button>
+      <button
+        type="button"
+        onClick={() => onSetAll(ONTARIO_WAGE_PRESETS.student.rate)}
+        className="btn-secondary text-xs"
+      >
+        {ONTARIO_WAGE_PRESETS.student.label} ${ONTARIO_WAGE_PRESETS.student.rate.toFixed(2)}
+      </button>
     </div>
   )
 }

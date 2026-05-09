@@ -16,7 +16,9 @@ export default async function ImportEmployeesPage() {
   }
 
   const supabase = getSupabaseAdmin()
-  const { data } = await supabase.from('employees').select('full_name').eq('active', true)
+  // Include inactive employees so the preview can flag them as duplicates too —
+  // matches the dedupe rule applied at save time.
+  const { data } = await supabase.from('employees').select('full_name')
   const existingNames = (data ?? []).map((e) => e.full_name)
 
   return (
@@ -30,14 +32,14 @@ export default async function ImportEmployeesPage() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto max-w-5xl">
-      <header className="pb-6">
-        <Link href="/employees" className="text-sm text-zinc-500 hover:underline">
+      <header className="pb-8">
+        <Link href="/employees" className="text-sm text-[color:var(--muted)] hover:text-[color:var(--foreground)]">
           ← Employees
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">Import from a sheet</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Upload a daily sign-in sheet. GPT-4o pulls out distinct names so you can review,
-          edit defaults, and bulk-add to the roster.
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Import from a sheet</h1>
+        <p className="mt-1 text-sm text-[color:var(--muted)]">
+          Upload a daily sign-in sheet, CSV, or XLSX. Names are extracted and dedupe is
+          case- and punctuation-insensitive — re-importing won't create duplicates.
         </p>
       </header>
       {children}
@@ -47,7 +49,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function OpenAINotice() {
   return (
-    <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+    <div className="mb-6 surface border-l-2 border-l-amber-500 p-4 text-sm">
       <p className="font-medium">OpenAI key missing.</p>
       <p className="mt-1">
         Add <code>OPENAI_API_KEY</code> to <code>.env.local</code> and restart the dev server.

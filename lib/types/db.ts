@@ -54,6 +54,8 @@ export type Shift = {
   needs_review: boolean
   review_flags: Record<string, unknown> | null
   source: 'manual' | 'ocr'
+  /** 0-based row position from the original sheet/scan. Null for legacy rows. */
+  display_order: number | null
   created_at: string
   updated_at: string
 }

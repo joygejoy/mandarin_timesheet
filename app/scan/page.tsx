@@ -34,12 +34,12 @@ export default async function ScanPage() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto max-w-7xl">
-      <header className="pb-6">
-        <Link href="/shifts" className="text-sm text-zinc-500 hover:underline">
+      <header className="pb-8">
+        <Link href="/shifts" className="text-sm text-[color:var(--muted)] hover:text-[color:var(--foreground)]">
           ← Daily shifts
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">Scan a daily sheet</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Scan a daily sheet</h1>
+        <p className="mt-1 text-sm text-[color:var(--muted)]">
           Upload a photo, GPT-4o extracts shifts, you correct anything fuzzy, then approve into a daily sheet.
         </p>
       </header>
@@ -50,7 +50,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function OpenAINotice() {
   return (
-    <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+    <div className="mb-6 surface border-l-2 border-l-amber-500 p-4 text-sm">
       <p className="font-medium">OpenAI key missing.</p>
       <p className="mt-1">
         Add <code>OPENAI_API_KEY</code> to <code>.env.local</code> and restart the dev server.

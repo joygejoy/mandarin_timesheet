@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { approveScannedSheet, type ApproveInputType } from './actions'
 import { EmployeeCombobox } from '@/app/_components/EmployeeCombobox'
+import { DEFAULT_WAGE_RATE } from '@/lib/wages'
 import type { Employee } from '@/lib/types/db'
 
 type Candidate = {
@@ -142,7 +143,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         include: true,
         employee_id: employee?.id ?? null,
         employee_name: employee?.full_name ?? s.employee_name,
-        hourly_rate: employee?.hourly_rate ?? 17.5,
+        hourly_rate: employee?.hourly_rate ?? DEFAULT_WAGE_RATE,
         role: employee?.role ?? '',
         section: s.section ?? '',
         start_time: s.start_time ?? '',
@@ -194,7 +195,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         include: true,
         employee_id: employees[0]?.id ?? null,
         employee_name: employees[0]?.full_name ?? '',
-        hourly_rate: employees[0]?.hourly_rate ?? 17.5,
+        hourly_rate: employees[0]?.hourly_rate ?? DEFAULT_WAGE_RATE,
         role: employees[0]?.role ?? '',
         section: '',
         start_time: '',
@@ -282,9 +283,11 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   if (step === 'done' && savedSheetId) {
     return (
       <div className="space-y-4">
-        <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-5 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+        <div className="surface border-l-2 border-l-emerald-500 p-4 text-sm">
           <p className="font-medium">Saved {candidates.filter((c) => c.include).length} shifts.</p>
-          <p className="mt-1">The sheet is in <strong>review</strong> status. Open it to fix anything else and approve into payroll.</p>
+          <p className="mt-1 text-[color:var(--muted)]">
+            The sheet is in <span className="text-[color:var(--foreground)]">review</span> status. Open it to fix anything else and approve into payroll.
+          </p>
         </div>
         <div className="flex gap-3">
           <Link href={`/shifts/${savedSheetId}`} className="btn-primary">
@@ -310,7 +313,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
           onFileChosen={onFileChosen}
         />
         {error && (
-          <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+          <div className="rounded-md border border-rose-200 bg-rose-50/60 p-3 text-sm text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
             {error}
           </div>
         )}
@@ -328,7 +331,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
       <div className="grid gap-6 md:grid-cols-[minmax(320px,2fr)_3fr]">
         {/* Photo (sticky on desktop) */}
         <div className="md:sticky md:top-6 md:self-start">
-          <div className="rounded-lg border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="surface p-2">
             {previewUrl && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -351,33 +354,37 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
           />
 
           {flaggedCount > 0 && (
-            <div className="rounded-md border-l-4 border-rose-500 bg-rose-50 p-3 text-sm text-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
-              <p className="font-semibold">
+            <div className="surface border-l-2 border-l-amber-500 p-3 text-sm">
+              <p className="font-medium">
                 {flaggedCount} {flaggedCount === 1 ? 'row needs' : 'rows need'} review
               </p>
-              <p className="mt-1 text-xs">
-                Rows in red are unreliable: low confidence, bracket-shared times, or missing fields.
-                Compare each one against the photo, fix anything wrong, then click <strong>Confirm</strong>.
+              <p className="mt-1 text-xs text-[color:var(--muted)]">
+                <span className="inline-flex items-center gap-1.5 mr-3">
+                  <span className="inline-block h-2 w-2 rounded-sm bg-amber-400" /> verify this cell
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-sm bg-rose-400" /> empty — fill in
+                </span>
+                <span className="ml-1">— fix the highlighted cells, then click the blue <strong>Confirm</strong> button on each row.</span>
               </p>
             </div>
           )}
 
-          <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="surface overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-800/50">
+              <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
                 <tr>
-                  <th className="w-10 px-2 py-3" />
-                  <th className="px-2 py-3 font-medium">Employee</th>
-                  <th className="px-2 py-3 font-medium">Sect</th>
-                  <th className="px-2 py-3 font-medium">Start</th>
-                  <th className="px-2 py-3 font-medium">End</th>
-                  <th className="px-2 py-3 font-medium">Brk</th>
-                  <th className="px-2 py-3 font-medium text-center">Meal</th>
-                  <th className="px-2 py-3 font-medium text-right">Rate</th>
-                  <th className="px-2 py-3 font-medium">Notes</th>
+                  <th className="w-10 px-2 py-2.5" />
+                  <th className="px-2 py-2.5 font-normal">Employee</th>
+                  <th className="px-2 py-2.5 font-normal">Start</th>
+                  <th className="px-2 py-2.5 font-normal">End</th>
+                  <th className="px-2 py-2.5 font-normal">Brk</th>
+                  <th className="px-2 py-2.5 font-normal text-center">Meal</th>
+                  <th className="px-2 py-2.5 font-normal text-right">Rate</th>
+                  <th className="w-10 px-2 py-2.5 font-normal text-center" title="Notes">📝</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              <tbody className="divide-y divide-[color:var(--border)]">
                 {candidates.map((c) => (
                   <Row
                     key={c.id}
@@ -395,13 +402,13 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
             <button onClick={addEmptyRow} className="btn-secondary text-xs">
               + Add row
             </button>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-[color:var(--muted)]">
               {selectedCount} selected{flaggedCount > 0 && ` · ${flaggedCount} flagged for review`}
             </p>
           </div>
 
           {error && (
-            <div className="rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+            <div className="rounded-md border border-rose-200 bg-rose-50/60 p-3 text-sm text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
               {error}
             </div>
           )}
@@ -433,8 +440,8 @@ function UploadCard({
 }) {
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+      <div className="surface p-4">
+        <label className="block text-xs text-[color:var(--muted)]">
           Sheet image
         </label>
         <input
@@ -443,28 +450,28 @@ function UploadCard({
           accept="image/*"
           capture="environment"
           disabled={step === 'extracting'}
-          className="mt-3 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-700 dark:file:bg-zinc-100 dark:file:text-zinc-900"
+          className="mt-2 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[color:var(--foreground)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[color:var(--background)] hover:file:opacity-85"
           onChange={(e) => {
             const f = e.target.files?.[0]
             if (f) onFileChosen(f)
           }}
         />
-        <p className="mt-3 text-xs text-zinc-500">
+        <p className="mt-3 text-xs text-[color:var(--muted)]">
           On mobile this opens your camera. JPG/PNG/HEIC up to 10 MB. Takes 10–30 seconds.
         </p>
         {step === 'extracting' && (
-          <p className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-            <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-zinc-400" />
+          <p className="mt-3 inline-flex items-center gap-2 text-sm text-[color:var(--muted)]">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[color:var(--accent)]" />
             Reading the sheet… GPT-4o is parsing handwriting and bracket notation.
           </p>
         )}
       </div>
-      <div className="rounded-lg border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="surface p-2">
         {previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={previewUrl} alt="Sheet preview" className="max-h-80 w-full rounded object-contain" />
         ) : (
-          <div className="flex h-full min-h-40 items-center justify-center text-xs text-zinc-400">
+          <div className="flex h-full min-h-40 items-center justify-center text-xs text-[color:var(--muted)]">
             Preview appears here
           </div>
         )}
@@ -485,10 +492,10 @@ function SheetHeader({
   setApprovedBy: (v: string) => void
 }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="surface p-4">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">
-          <span className="mb-1 block text-zinc-600 dark:text-zinc-400">Sheet date</span>
+          <span className="mb-1 block text-xs text-[color:var(--muted)]">Sheet date</span>
           <input
             type="date"
             required
@@ -498,7 +505,7 @@ function SheetHeader({
           />
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-zinc-600 dark:text-zinc-400">Approved by (manager)</span>
+          <span className="mb-1 block text-xs text-[color:var(--muted)]">Approved by (manager)</span>
           <input
             type="text"
             value={approvedBy}
@@ -514,8 +521,8 @@ function SheetHeader({
 
 function MetaBox({ meta }: { meta: SheetMeta }) {
   return (
-    <div className="mt-3 rounded-md bg-zinc-50 p-3 text-xs text-zinc-600 dark:bg-zinc-800/40 dark:text-zinc-400">
-      <p className="font-medium text-zinc-700 dark:text-zinc-300">What the model saw</p>
+    <div className="mt-3 rounded-md border border-[color:var(--border)] bg-[color:var(--background)] p-3 text-xs text-[color:var(--muted)]">
+      <p className="text-[color:var(--foreground)]">What the model saw</p>
       <ul className="mt-2 space-y-1">
         {meta.date_text && <li>Date: {meta.date_text}</li>}
         {meta.shift_type && <li>Shift type: {meta.shift_type}</li>}
@@ -538,27 +545,26 @@ function Row({
   onEmployeeChange: (picked: { id: string | null; label: string }) => void
 }) {
   const flagged = c.needs_review
-  const lowConf = c.confidence < 0.7
-  const incomplete = !c.start_time || !c.end_time
+  // Match the row-level threshold from onFileChosen so cells inside a
+  // flagged row actually get highlighted. Previously this used <0.7 while
+  // the row used <0.8, leaving a 0.7–0.8 dead zone where the row was
+  // flagged but no individual cell got an amber wrapper.
+  const lowConf = c.confidence < 0.8
+  const startMissing = !c.start_time
+  const endMissing = !c.end_time
 
   // Cell-level "must review" hints: a field is suspect when the model said so
   // (low overall confidence or bracket-inferred) AND the manager hasn't yet
   // edited the predicted value. Clearing the row's review flag (Confirm)
   // also clears the cell highlights.
   const startSuspect =
-    flagged && (lowConf || c.inferred_from_bracket) && c.start_time === c.predicted_start_time
+    flagged && (lowConf || c.inferred_from_bracket) && c.start_time === c.predicted_start_time && !startMissing
   const endSuspect =
-    flagged && (lowConf || c.inferred_from_bracket) && c.end_time === c.predicted_end_time
+    flagged && (lowConf || c.inferred_from_bracket) && c.end_time === c.predicted_end_time && !endMissing
   const sectionSuspect =
     flagged && lowConf && c.section === c.predicted_section
 
-  const rowClass = !c.include
-    ? 'opacity-50'
-    : flagged
-    ? 'bg-rose-50/70 dark:bg-rose-950/30 border-l-4 border-rose-500'
-    : ''
-  const suspectCellClass =
-    'border-rose-400 ring-1 ring-rose-300 bg-white dark:bg-zinc-900'
+  const rowClass = !c.include ? 'opacity-50' : ''
 
   return (
     <tr className={rowClass}>
@@ -582,66 +588,50 @@ function Row({
           className="min-w-44"
         />
         {flagged && (
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center rounded-sm bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-              Must review
-            </span>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => onPatch({ needs_review: false })}
-              className="rounded-sm border border-emerald-600 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300"
+              className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              title="Mark this row as confirmed and clear the cell highlights"
             >
-              Confirm
+              ✓ Confirm
             </button>
-            <span className="text-[10px] text-rose-700 dark:text-rose-300">
-              {lowConf && `${Math.round(c.confidence * 100)}% conf`}
-              {lowConf && c.inferred_from_bracket && ' · '}
-              {c.inferred_from_bracket && 'bracket-shared'}
+            <span className="text-[10px] text-[color:var(--muted)]">
+              {summarizeReviewReason({ lowConf, c, startMissing, endMissing, startSuspect, endSuspect, sectionSuspect: false })}
             </span>
           </div>
         )}
       </td>
       <td className="px-2 py-2 align-top">
-        <input
-          className={`input w-12 ${sectionSuspect ? suspectCellClass : ''}`}
-          maxLength={20}
-          value={c.section}
-          onChange={(e) => onPatch({ section: e.target.value })}
-        />
-        {flagged && c.predicted_section && c.section !== c.predicted_section && (
-          <p className="mt-1 text-[10px] text-zinc-500">
-            model said: <span className="font-medium">{c.predicted_section}</span>
-          </p>
-        )}
-      </td>
-      <td className="px-2 py-2 align-top">
-        <div className={startSuspect ? `rounded ${suspectCellClass}` : ''}>
+        <CellShell tone={startMissing ? 'missing' : startSuspect ? 'review' : null}>
           <TimeInput
             value={c.start_time}
             onChange={(v) => onPatch({ start_time: v })}
           />
-        </div>
-        {flagged && c.predicted_start_time && c.start_time !== c.predicted_start_time && (
-          <p className="mt-1 text-[10px] text-zinc-500">
-            model said: <span className="font-medium">{formatTime12(c.predicted_start_time)}</span>
-          </p>
-        )}
+          {startMissing && c.include && <ReviewHint label="missing — fill in" />}
+          {startSuspect && (
+            <ReviewHint
+              label="check time"
+              modelSaid={c.predicted_start_time ? formatTime12(c.predicted_start_time) : null}
+            />
+          )}
+        </CellShell>
       </td>
       <td className="px-2 py-2 align-top">
-        <div className={endSuspect ? `rounded ${suspectCellClass}` : ''}>
+        <CellShell tone={endMissing ? 'missing' : endSuspect ? 'review' : null}>
           <TimeInput
             value={c.end_time}
             onChange={(v) => onPatch({ end_time: v })}
           />
-        </div>
-        {incomplete && c.include && (
-          <p className="mt-1 text-[10px] text-rose-600">missing</p>
-        )}
-        {flagged && c.predicted_end_time && c.end_time !== c.predicted_end_time && (
-          <p className="mt-1 text-[10px] text-zinc-500">
-            model said: <span className="font-medium">{formatTime12(c.predicted_end_time)}</span>
-          </p>
-        )}
+          {endMissing && c.include && <ReviewHint label="missing — fill in" />}
+          {endSuspect && (
+            <ReviewHint
+              label="check time"
+              modelSaid={c.predicted_end_time ? formatTime12(c.predicted_end_time) : null}
+            />
+          )}
+        </CellShell>
       </td>
       <td className="px-2 py-2 align-top">
         <input
@@ -670,15 +660,151 @@ function Row({
         />
       </td>
       <td className="px-2 py-2 align-top">
-        <input
-          className="input"
+        <NotesCell
           value={c.notes}
-          maxLength={500}
-          onChange={(e) => onPatch({ notes: e.target.value })}
+          onChange={(v) => onPatch({ notes: v })}
         />
       </td>
     </tr>
   )
+}
+
+/**
+ * Notes cell collapsed by default to keep the row compact. A small icon
+ * button reveals the input inline; blur (or Escape) collapses it back. The
+ * icon turns blue when the cell already holds text so the manager can tell
+ * which rows have notes at a glance.
+ */
+function NotesCell({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (next: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Auto-focus the input when the cell expands.
+  useEffect(() => {
+    if (open) inputRef.current?.focus()
+  }, [open])
+
+  if (open) {
+    return (
+      <input
+        ref={inputRef}
+        className="input w-56"
+        value={value}
+        maxLength={500}
+        placeholder="Notes…"
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' || e.key === 'Enter') {
+            ;(e.target as HTMLInputElement).blur()
+          }
+        }}
+      />
+    )
+  }
+
+  const hasNotes = value.trim().length > 0
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      title={hasNotes ? value : 'Add notes'}
+      aria-label={hasNotes ? `Notes: ${value}` : 'Add notes'}
+      className={
+        'flex h-8 w-8 items-center justify-center rounded-md text-base transition ' +
+        (hasNotes
+          ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300'
+          : 'text-[color:var(--muted)] hover:bg-black/5 dark:hover:bg-white/5')
+      }
+    >
+      📝
+    </button>
+  )
+}
+
+/**
+ * Wraps a cell input with a tone-coded background so the manager can spot
+ * exactly which cell needs attention without scanning every column.
+ *   - 'review'  = OCR is uncertain (amber)
+ *   - 'missing' = required field is empty (rose)
+ */
+function CellShell({
+  tone,
+  children,
+}: {
+  tone: 'review' | 'missing' | null
+  children: React.ReactNode
+}) {
+  if (!tone) return <>{children}</>
+  const cls =
+    tone === 'review'
+      ? 'rounded-md bg-amber-100/70 p-1.5 ring-1 ring-amber-400 dark:bg-amber-900/25 dark:ring-amber-700'
+      : 'rounded-md bg-rose-100/70 p-1.5 ring-1 ring-rose-400 dark:bg-rose-900/25 dark:ring-rose-700'
+  return <div className={cls}>{children}</div>
+}
+
+/**
+ * Inline caption inside a flagged cell — keeps the "this needs your eyes" cue
+ * and the OCR's original guess together so the manager can verify in place.
+ */
+function ReviewHint({
+  label,
+  modelSaid,
+}: {
+  label: string
+  modelSaid?: string | null
+}) {
+  return (
+    <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
+      <span className="mr-1">⚠</span>
+      {label}
+      {modelSaid && (
+        <span className="ml-1 font-normal normal-case text-[color:var(--muted)]">
+          (model: <span className="font-medium text-[color:var(--foreground)]">{modelSaid}</span>)
+        </span>
+      )}
+    </p>
+  )
+}
+
+/**
+ * One-line summary shown beside the Confirm button explaining why the row is
+ * flagged. Keeps the per-row noise low while pointing at the column(s).
+ */
+function summarizeReviewReason({
+  lowConf,
+  c,
+  startMissing,
+  endMissing,
+  startSuspect,
+  endSuspect,
+}: {
+  lowConf: boolean
+  c: Candidate
+  startMissing: boolean
+  endMissing: boolean
+  startSuspect: boolean
+  endSuspect: boolean
+  // Accepted but unused — kept so existing callers remain stable.
+  sectionSuspect?: boolean
+}): string {
+  const parts: string[] = []
+  if (startMissing) parts.push('start (empty)')
+  else if (startSuspect) parts.push('start')
+  if (endMissing) parts.push('end (empty)')
+  else if (endSuspect) parts.push('end')
+  if (parts.length === 0) {
+    if (lowConf) return `${Math.round(c.confidence * 100)}% confidence`
+    if (c.inferred_from_bracket) return 'bracket-shared time'
+    return 'verify all fields'
+  }
+  return `verify: ${parts.join(', ')}`
 }
 
 function TimeInput({

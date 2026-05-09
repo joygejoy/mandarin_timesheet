@@ -140,7 +140,83 @@ function classifyFile(file: File): 'image' | 'text' | 'pdf' | 'excel' | 'unknown
   return 'unknown'
 }
 
-const HEADER_TOKENS = new Set(['name', 'full name', 'employee', 'employee name', 'server', 'staff'])
+// Header cells we recognize. Used both to detect a header row and to pick which
+// column holds the name vs the role. Order inside each set doesn't matter.
+const NAME_HEADERS = new Set([
+  'name',
+  'full name',
+  'fullname',
+  'employee',
+  'employee name',
+  "employee's name",
+  'staff',
+  'staff name',
+  "staff's name",
+  'server',
+  "server's name",
+  'first name',
+  'person',
+])
+const ROLE_HEADERS = new Set(['role', 'position', 'title', 'job', 'job title'])
+const RATE_HEADERS = new Set(['rate', 'hourly rate', 'hourly', 'pay rate', 'wage'])
+const ANY_KNOWN_HEADER = new Set<string>([
+  ...NAME_HEADERS,
+  ...ROLE_HEADERS,
+  ...RATE_HEADERS,
+  // Extra columns that indicate a header row even when no NAME header is present.
+  'emp. no.',
+  'emp no',
+  'emp no.',
+  'employee no',
+  'employee no.',
+  'employee number',
+  'id',
+  'no.',
+  'number',
+  '#',
+  'wk hr',
+  '1st wk hr',
+  '2nd wk hr',
+  'meal',
+  'break',
+  'hours',
+  'date',
+])
+
+// Things that look like rows but aren't people.
+const SKIP_ROW_FIRST_CELL = new Set([
+  'total',
+  'totals',
+  'subtotal',
+  'sum',
+  'grand total',
+])
+
+type ColumnLayout = {
+  nameIdx: number
+  roleIdx: number | null
+}
+
+function looksLikeHeader(cells: string[]): boolean {
+  // A row is a header if at least one cell matches a known header token.
+  for (const c of cells) {
+    if (ANY_KNOWN_HEADER.has(c.toLowerCase())) return true
+  }
+  return false
+}
+
+function detectColumnLayout(headerCells: string[]): ColumnLayout {
+  let nameIdx = -1
+  let roleIdx: number | null = null
+  for (let i = 0; i < headerCells.length; i++) {
+    const k = headerCells[i].toLowerCase().trim()
+    if (nameIdx === -1 && NAME_HEADERS.has(k)) nameIdx = i
+    else if (roleIdx === null && ROLE_HEADERS.has(k)) roleIdx = i
+  }
+  return { nameIdx, roleIdx }
+}
+
+const NUMERIC_RE = /^[\d.,\s$%-]+$/
 
 function parseTextEmployees(text: string): ExtractedEmployee[] {
   const lines = text
@@ -152,26 +228,64 @@ function parseTextEmployees(text: string): ExtractedEmployee[] {
   if (lines.length === 0) return []
 
   const delim = detectDelimiter(lines)
+  // Default layout: column 0 is the name, no role column. Updated as soon as
+  // we see a header row.
+  let layout: ColumnLayout = { nameIdx: 0, roleIdx: 1 }
+  let sawHeader = false
+
   const seenLower = new Set<string>()
   const out: ExtractedEmployee[] = []
 
   for (let i = 0; i < lines.length; i++) {
     const cells = splitRow(lines[i], delim).map((c) => c.trim())
-    if (cells.length === 0 || !cells[0]) continue
+    if (cells.length === 0 || cells.every((c) => !c)) continue
 
-    if (i === 0 && HEADER_TOKENS.has(cells[0].toLowerCase())) continue // header row
+    // Header row (could appear more than once in the same file — e.g. xlsx
+    // exports of multi-section rosters with a header above each section).
+    if (looksLikeHeader(cells)) {
+      const detected = detectColumnLayout(cells)
+      if (detected.nameIdx !== -1) {
+        layout = detected
+        sawHeader = true
+      } else if (!sawHeader) {
+        // Header without an explicit name column (e.g. "Emp. No., Staff's
+        // Name, ..."). detectColumnLayout already handled "Staff's Name", so
+        // this branch is rare — keep the default layout.
+      }
+      continue
+    }
 
-    const name = cells[0]
-    if (name.length > 120) continue
+    // Skip footer-style rows ("TOTAL", "TOTALS", "Subtotal", ...).
+    const firstCellLower = (cells[0] || '').toLowerCase()
+    if (SKIP_ROW_FIRST_CELL.has(firstCellLower)) continue
+
+    // Pull the name from the detected column. Fall back to the first non-empty
+    // cell if that column is blank in this row.
+    let name = (cells[layout.nameIdx] ?? '').trim()
+    if (!name) {
+      const firstNonEmpty = cells.find((c) => c.trim().length > 0)
+      if (!firstNonEmpty) continue
+      // Only fall back if it doesn't look like a number (employee ID, etc.).
+      if (NUMERIC_RE.test(firstNonEmpty)) continue
+      name = firstNonEmpty.trim()
+    }
+    if (!name || name.length > 120) continue
+    // A pure number isn't a name (e.g. employee IDs in the wrong column).
+    if (NUMERIC_RE.test(name)) continue
+
     const lower = name.toLowerCase()
     if (seenLower.has(lower)) continue
     seenLower.add(lower)
 
-    const role = cells[1]?.trim() || null
+    let role: string | null = null
+    if (layout.roleIdx != null) {
+      const r = (cells[layout.roleIdx] ?? '').trim()
+      if (r && r.toLowerCase() !== 'role') role = r
+    }
 
     out.push({
       name,
-      role: role && role.toLowerCase() !== 'role' ? role : null,
+      role,
       confidence: 1,
       source_note: `row ${i + 1}`,
     })

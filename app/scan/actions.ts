@@ -91,8 +91,10 @@ export async function approveScannedSheet(input: ApproveInputType): Promise<Appr
     }
   }
 
-  // Insert all the reviewed shift rows.
-  const rowsToInsert = data.rows.map((r) => ({
+  // Insert all the reviewed shift rows. display_order preserves the top-to-
+  // bottom reading order from the scanned sheet so the daily view can render
+  // rows in the same order the manager saw them in the OCR review.
+  const rowsToInsert = data.rows.map((r, i) => ({
     daily_sheet_id: dailySheetId!,
     employee_id: r.employee_id,
     employee_name_snapshot: r.employee_name,
@@ -109,9 +111,22 @@ export async function approveScannedSheet(input: ApproveInputType): Promise<Appr
     review_flags:
       r.confidence != null && r.confidence < 0.7 ? { confidence: r.confidence } : null,
     source: 'ocr' as const,
+    display_order: i,
   }))
 
-  const { error: insertErr } = await supabase.from('shifts').insert(rowsToInsert)
+  let { error: insertErr } = await supabase.from('shifts').insert(rowsToInsert)
+  // Older databases may not have the display_order column yet (migration
+  // 0002_shift_display_order.sql not applied). Retry without it so existing
+  // installs keep working until the manager runs the SQL.
+  if (insertErr && /display_order/i.test(insertErr.message)) {
+    const fallbackRows = rowsToInsert.map((row) => {
+      const copy: Record<string, unknown> = { ...row }
+      delete copy.display_order
+      return copy
+    })
+    const retry = await supabase.from('shifts').insert(fallbackRows)
+    insertErr = retry.error
+  }
   if (insertErr) throw new Error(insertErr.message)
 
   // Archive raw OCR for audit / re-review.

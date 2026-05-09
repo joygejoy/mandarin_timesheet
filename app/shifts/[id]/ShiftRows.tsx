@@ -2,7 +2,14 @@
 
 import { useState, useTransition } from 'react'
 import { updateShift, deleteShift, type ShiftPatchInput } from '../actions'
-import { shiftPaidHours, shiftPay, formatMinutes, shiftPaidMinutes } from '@/lib/payroll'
+import {
+  shiftPaidHours,
+  shiftPay,
+  shiftGrossPay,
+  shiftMealDeduction,
+  formatMinutes,
+  shiftPaidMinutes,
+} from '@/lib/payroll'
 import { EmployeeCombobox } from '@/app/_components/EmployeeCombobox'
 import type { Shift, Employee } from '@/lib/types/db'
 
@@ -18,24 +25,24 @@ export function ShiftRows({
   readOnly?: boolean
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="surface overflow-x-auto">
       <table className="min-w-full text-sm">
-        <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-800/50">
+        <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
           <tr>
-            <th className="px-3 py-3 font-medium">Employee</th>
-            <th className="px-3 py-3 font-medium">Sect</th>
-            <th className="px-3 py-3 font-medium">Start</th>
-            <th className="px-3 py-3 font-medium">End</th>
-            <th className="px-3 py-3 font-medium text-right">Break</th>
-            <th className="px-3 py-3 font-medium text-center">Meal</th>
-            <th className="px-3 py-3 font-medium text-right">Rate</th>
-            <th className="px-3 py-3 font-medium text-right">Hours</th>
-            <th className="px-3 py-3 font-medium text-right">Pay</th>
-            <th className="px-3 py-3 font-medium">Notes</th>
-            {!readOnly && <th className="px-3 py-3 font-medium" />}
+            <th className="px-3 py-2.5 font-normal">Employee</th>
+            <th className="px-3 py-2.5 font-normal">Sect</th>
+            <th className="px-3 py-2.5 font-normal">Start</th>
+            <th className="px-3 py-2.5 font-normal">End</th>
+            <th className="px-3 py-2.5 font-normal text-right">Break</th>
+            <th className="px-3 py-2.5 font-normal text-center">Meal</th>
+            <th className="px-3 py-2.5 font-normal text-right">Rate</th>
+            <th className="px-3 py-2.5 font-normal text-right">Hours</th>
+            <th className="px-3 py-2.5 font-normal text-right">Pay</th>
+            <th className="px-3 py-2.5 font-normal">Notes</th>
+            {!readOnly && <th className="px-3 py-2.5 font-normal" />}
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <tbody className="divide-y divide-[color:var(--border)]">
           {shifts.map((s) => (
             <Row key={s.id} shift={s} sheetId={sheetId} employees={employees} readOnly={readOnly} />
           ))}
@@ -104,12 +111,14 @@ function Row({
 
   const minutes = shiftPaidMinutes(s)
   const hours = shiftPaidHours(s)
+  const grossPay = shiftGrossPay(s)
+  const mealDeduction = shiftMealDeduction(s)
   const pay = shiftPay(s)
   const incomplete = !s.start_time || !s.end_time
 
   if (readOnly) {
     return (
-      <tr className="bg-emerald-50/40 dark:bg-emerald-950/20">
+      <tr className="bg-emerald-50/30 dark:bg-emerald-950/10">
         <td className="px-3 py-2">{s.employee_name_snapshot}</td>
         <td className="px-3 py-2">{s.section ?? '—'}</td>
         <td className="px-3 py-2 tabular-nums">{s.start_time ?? '—'}</td>
@@ -120,7 +129,17 @@ function Row({
         <td className="px-3 py-2 text-right tabular-nums">
           {incomplete ? '—' : hours.toFixed(2)}
         </td>
-        <td className="px-3 py-2 text-right tabular-nums">{incomplete ? '—' : `$${pay.toFixed(2)}`}</td>
+        <td className="px-3 py-2 text-right tabular-nums">
+          {incomplete ? '—' : `$${pay.toFixed(2)}`}
+          {!incomplete && mealDeduction > 0 && (
+            <div
+              className="text-[10px] text-[color:var(--muted)]"
+              title={`Gross $${grossPay.toFixed(2)} − $${mealDeduction.toFixed(2)} meal`}
+            >
+              −${mealDeduction.toFixed(2)} meal
+            </div>
+          )}
+        </td>
         <td className="px-3 py-2 text-zinc-500">{s.notes ?? ''}</td>
       </tr>
     )
@@ -208,6 +227,14 @@ function Row({
       </td>
       <td className="px-3 py-2 text-right tabular-nums">
         {incomplete ? <span className="text-zinc-400">—</span> : `$${pay.toFixed(2)}`}
+        {!incomplete && mealDeduction > 0 && (
+          <div
+            className="text-[10px] text-[color:var(--muted)]"
+            title={`Gross $${grossPay.toFixed(2)} − $${mealDeduction.toFixed(2)} meal`}
+          >
+            −${mealDeduction.toFixed(2)} meal
+          </div>
+        )}
         {minutes > 0 && (
           <div className="text-[10px] text-zinc-400">{formatMinutes(minutes)}</div>
         )}

@@ -158,6 +158,9 @@ export async function pushBiweeklySummary(opts: {
     'Shifts',
     'Hours',
     'Gross pay',
+    'Meals',
+    'Meal deduction',
+    'Net pay',
     'Alcohol points',
   ]
   const employeeRows = opts.summary.rows.map((r) => [
@@ -166,6 +169,9 @@ export async function pushBiweeklySummary(opts: {
     r.shift_count.toString(),
     r.total_hours.toFixed(2),
     r.gross_pay.toFixed(2),
+    r.meal_count.toString(),
+    r.meal_deduction.toFixed(2),
+    r.net_pay.toFixed(2),
     r.alcohol_points.toString(),
   ])
   const totalsRow = [
@@ -173,6 +179,9 @@ export async function pushBiweeklySummary(opts: {
     '',
     '',
     opts.summary.total_hours.toFixed(2),
+    opts.summary.total_gross_pay.toFixed(2),
+    '',
+    opts.summary.total_meal_deduction.toFixed(2),
     opts.summary.total_pay.toFixed(2),
     opts.summary.total_alcohol_points.toString(),
   ]

@@ -138,10 +138,10 @@ export function EmployeeCombobox({
         <ul
           ref={listRef}
           role="listbox"
-          className="absolute z-20 mt-1 max-h-60 w-full min-w-44 overflow-auto rounded-md border border-zinc-200 bg-white py-1 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+          className="absolute z-20 mt-1 max-h-60 w-full min-w-44 overflow-auto rounded-md border border-[color:var(--border)] bg-[color:var(--surface)] py-1 text-sm shadow-md"
         >
           {filtered.length === 0 && !customRowVisible && (
-            <li className="px-3 py-1.5 text-zinc-400">No matches</li>
+            <li className="px-3 py-1.5 text-[color:var(--muted)]">No matches</li>
           )}
           {filtered.map((o, i) => (
             <li
@@ -155,12 +155,12 @@ export function EmployeeCombobox({
               }}
               onMouseEnter={() => setHighlighted(i)}
               className={`cursor-pointer px-3 py-1.5 ${
-                i === highlighted ? 'bg-zinc-100 dark:bg-zinc-800' : ''
+                i === highlighted ? 'bg-black/5 dark:bg-white/5' : ''
               }`}
             >
               {o.label}
               {o.sublabel && (
-                <span className="ml-2 text-xs text-zinc-500">{o.sublabel}</span>
+                <span className="ml-2 text-xs text-[color:var(--muted)]">{o.sublabel}</span>
               )}
             </li>
           ))}
@@ -174,11 +174,11 @@ export function EmployeeCombobox({
                 selectByIndex(filtered.length)
               }}
               onMouseEnter={() => setHighlighted(filtered.length)}
-              className={`cursor-pointer border-t border-zinc-100 px-3 py-1.5 italic dark:border-zinc-800 ${
-                highlighted === filtered.length ? 'bg-zinc-100 dark:bg-zinc-800' : ''
+              className={`cursor-pointer border-t border-[color:var(--border)] px-3 py-1.5 italic ${
+                highlighted === filtered.length ? 'bg-black/5 dark:bg-white/5' : ''
               }`}
             >
-              Use “{trimmedQuery}” (not in roster)
+              Use "{trimmedQuery}" (not in roster)
             </li>
           )}
         </ul>

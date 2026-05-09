@@ -1,46 +1,98 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Notion-ish off-white. Slightly warm, low contrast. */
+  --background: #fbfbfa;
+  --surface: #ffffff;
+  --foreground: #1f1f1e;
+  --muted: #6b6b6a;
+  --border: #ebebe9;
+  --border-strong: #d8d8d6;
+  --accent: #2563eb;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
+    --background: #191919;
+    --surface: #1f1f1f;
     --foreground: #ededed;
+    --muted: #9b9b9b;
+    --border: #2a2a2a;
+    --border-strong: #3a3a3a;
+    --accent: #6ea8ff;
   }
 }
 
 body {
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
 }
+
+/* ---- Form controls ---- */
 
 @utility input {
-  @apply w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm
-         shadow-sm outline-none transition
-         focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10
-         dark:border-zinc-700 dark:bg-zinc-900
-         dark:focus:border-zinc-100 dark:focus:ring-zinc-100/10;
+  @apply w-full rounded-md border border-[color:var(--border-strong)] bg-[color:var(--surface)]
+         px-2.5 py-1.5 text-sm outline-none transition
+         placeholder:text-[color:var(--muted)]
+         focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent)]/15;
 }
 
+/* ---- Buttons ---- */
+
 @utility btn-primary {
-  @apply inline-flex items-center justify-center gap-2 rounded-md bg-zinc-900
-         px-4 py-2 text-sm font-medium text-white
-         transition hover:bg-zinc-700 disabled:opacity-50
-         dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300;
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md
+         bg-[color:var(--foreground)] px-3 py-1.5 text-sm font-medium
+         text-[color:var(--background)] transition
+         hover:opacity-85 disabled:opacity-50;
 }
 
 @utility btn-secondary {
-  @apply inline-flex items-center justify-center gap-2 rounded-md border
-         border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900
-         transition hover:bg-zinc-100
-         dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800;
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md border
+         border-[color:var(--border-strong)] bg-[color:var(--surface)]
+         px-3 py-1.5 text-sm font-medium text-[color:var(--foreground)]
+         transition hover:bg-black/5 dark:hover:bg-white/5
+         disabled:opacity-50;
+}
+
+@utility btn-ghost {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md
+         px-2 py-1 text-sm text-[color:var(--muted)]
+         transition hover:bg-black/5 hover:text-[color:var(--foreground)]
+         dark:hover:bg-white/5 disabled:opacity-50;
+}
+
+/* ---- Surfaces ---- */
+
+@utility surface {
+  @apply rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)];
+}
+
+@utility hairline {
+  @apply border-[color:var(--border)];
+}
+
+/* ---- Status dot ---- */
+
+@utility dot {
+  @apply inline-block h-1.5 w-1.5 rounded-full;
+}
+
+/* ---- Subtle link underline on hover ---- */
+
+@utility link-soft {
+  @apply text-[color:var(--foreground)] underline-offset-4 transition
+         hover:underline hover:decoration-[color:var(--border-strong)];
 }

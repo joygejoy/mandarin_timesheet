@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { ONTARIO_WAGE_PRESETS } from '@/lib/wages'
 
 const EmployeeInput = z.object({
   full_name: z.string().trim().min(1, 'Name required').max(120),
@@ -85,6 +86,57 @@ export async function deleteEmployee(id: string) {
   const { error } = await supabase.from('employees').delete().eq('id', id)
   if (error) throw new Error(error.message)
   revalidatePath('/employees')
+}
+
+/**
+ * Hard-delete a batch of employees in one query. Same FK behavior as
+ * deleteEmployee — historical shifts keep their snapshot.
+ */
+export async function deleteEmployees(ids: string[]): Promise<{ deleted: number }> {
+  if (ids.length === 0) return { deleted: 0 }
+  const supabase = getSupabaseAdmin()
+  const { error, count } = await supabase
+    .from('employees')
+    .delete({ count: 'exact' })
+    .in('id', ids)
+  if (error) throw new Error(error.message)
+  revalidatePath('/employees')
+  return { deleted: count ?? ids.length }
+}
+
+/**
+ * Hard-delete EVERY employee. Use with care — this clears the roster.
+ * Past shifts/alcohol sales keep their name snapshots.
+ */
+export async function deleteAllEmployees(): Promise<{ deleted: number }> {
+  const supabase = getSupabaseAdmin()
+  // Supabase requires a filter on delete by default; use a tautology.
+  const { error, count } = await supabase
+    .from('employees')
+    .delete({ count: 'exact' })
+    .not('id', 'is', null)
+  if (error) throw new Error(error.message)
+  revalidatePath('/employees')
+  return { deleted: count ?? 0 }
+}
+
+/**
+ * Reset every employee's hourly_rate to the current Ontario minimum wage.
+ * Past shifts/alcohol sales keep their snapshot rate, so historical pay
+ * is unaffected — this only changes the rate going forward.
+ */
+export async function setAllWagesToMinimum(): Promise<{ updated: number }> {
+  const supabase = getSupabaseAdmin()
+  const { error, count } = await supabase
+    .from('employees')
+    .update(
+      { hourly_rate: ONTARIO_WAGE_PRESETS.minimum.rate },
+      { count: 'exact' }
+    )
+    .not('id', 'is', null)
+  if (error) throw new Error(error.message)
+  revalidatePath('/employees')
+  return { updated: count ?? 0 }
 }
 
 /** Inline rate update from the list. */

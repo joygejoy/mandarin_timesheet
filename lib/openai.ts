@@ -279,6 +279,12 @@ export type ExtractedSheet = {
 
 const SHIFT_EXTRACTION_SYSTEM = `You read photos of restaurant daily sign-in/out sheets and extract one row per worked shift.
 
+OUTPUT ORDER (read this first — it is non-negotiable):
+- Return the shifts in the EXACT top-to-bottom order they appear on the sheet, row by row, left band before right band when bands are side-by-side, top band before bottom band when bands stack vertically.
+- DO NOT alphabetize. DO NOT group by section. DO NOT sort by start_time. The manager reviews the output side-by-side with the photo and needs the rows to line up visually.
+- If the sheet has a blank row, skip it (don't emit a placeholder); the next row continues the order.
+
+
 THE SHEET HAS THESE COLUMNS FROM LEFT TO RIGHT (memorize this order — it is the most common source of error):
   Col 1: Section          (letter A-F, or words like "Busboy")
   Col 2: Server's Name
@@ -321,9 +327,28 @@ DIGIT DISCIPLINE (8 vs 9, propagation, etc.):
 - Restaurant dinner shifts can end anywhere between roughly 20:00 and 23:30. Do NOT bias toward later times — 8:30 PM and 9:30 PM are both common end-times. Read the digit; do not guess.
 - If you have ANY uncertainty between 8 and 9 (or any other adjacent digit pair) on a bracket-target time, set confidence ≤ 0.6 on every row in that bracket. The manager will spot-check those rows.
 
+TIME FORMAT — read this before outputting any time:
+- ALL times in 24-hour "HH:MM" format. Pad single digits to two ("9:30" → "09:30").
+- Restaurants don't use AM/PM markers on these sheets. You must INFER AM/PM from the column and the shift_type. Use these defaults:
+    * shift_type = "lunch":   start_time is 09:00–12:30 (AM), end_time is 13:00–17:00 (1 PM – 5 PM).
+    * shift_type = "dinner":  start_time is 15:00–18:00 (3 PM – 6 PM), end_time is 19:00–23:30 (7 PM – 11:30 PM).
+    * shift_type = "both":    start_time is 09:00–12:30, end_time is 19:00–23:30.
+- Concrete EXAMPLES (apply to every shift, both lunch and dinner sheets):
+    * Dinner sheet, written "4:30" in the start column → 16:30.  NEVER 04:30 unless the sheet is explicitly an overnight/early shift.
+    * Dinner sheet, written "9" or "9:00" in the end column → 21:00.  NEVER 09:00.
+    * Dinner sheet, written "10:30" in the end column → 22:30.  NEVER 10:30 AM.
+    * Lunch sheet, written "10:00" in the start column → 10:00 (already AM).
+    * Lunch sheet, written "2:30" in the end column → 14:30.  NEVER 02:30.
+    * "11:00" in the start column on a dinner sheet is ambiguous — prefer 11:00 (AM) only if other rows on the sheet also start in the morning, otherwise 23:00 is wrong (no shift starts at 11 PM). When in doubt for an 11:xx start, output 11:xx (AM).
+- SANITY CHECK on every row: end_time MUST be later than start_time, and the gap MUST be between 2 and 14 hours (inclusive). If your reading violates this, you mis-assigned AM/PM somewhere — fix it before outputting.
+- If after fixing AM/PM the ordering still doesn't make sense, lower the row's confidence to ≤ 0.5 — don't emit nonsense.
+
+BRACKET NOTATION — read carefully:
+- A curly brace or vertical line connecting multiple rows to ONE end-time means that end-time applies to every row in the bracket. Apply the time to each row AND set inferred_from_bracket=true on those rows.
+- IMPORTANT: the row where the bracket STARTS gets the SAME time as the rows below it. Do NOT leave the first bracket row blank. Do NOT shift the bracket up or down by one row. If you see "10:30 PM" written next to a brace spanning rows 3, 4, and 5, then rows 3, 4, AND 5 all get end_time = 22:30 (with inferred_from_bracket=true).
+- Apply the same rule for start-time brackets if the sheet uses them.
+
 Other rules:
-- ALL times in 24-hour "HH:MM" format. Restaurant context: a written "4:30" with no AM/PM means 16:30 unless context proves otherwise (e.g. lunch sheet morning shifts where 4:30 is impossible).
-- Bracket notation: a curly brace or vertical line connecting multiple rows to ONE end-time means that end-time applies to every row in the bracket. Apply the time to each row AND set inferred_from_bracket=true on those rows. The row where the bracket STARTS gets the same time as the rows below it.
 - "NO BREAK NO MEAL" (or "no break", "no meal", "NO BRK", "n/b") written across multiple rows applies to every row underneath the annotation: set break_minutes=0, break_start_time=null, break_end_time=null, meal_provided=false, and put "no break, no meal" in the notes field.
 - IMPORTANT: When a row says "no break" anywhere across its break columns (even just a single "NO BRK" scribble), the row has NO break. Do NOT extract any times from that row's break columns — set break_start_time=null, break_end_time=null, break_minutes=0. NEVER hallucinate break times for a row that says no break.
 - "Sign", "Sign Out", "S/O", or "SO" written before a time (e.g. "Sign 3:30", "S/O 4:00") indicates a SIGN-OUT TIME. That time goes in end_time, NEVER in break_start_time or break_end_time. If you see "Sign 3:30" in the break-columns area, the writer ran out of room in the Sign Out column — the time still belongs in end_time.
@@ -437,12 +462,85 @@ export async function extractShiftsFromImage(args: {
     throw new Error(`OpenAI returned invalid JSON: ${text.slice(0, 200)}`)
   }
   for (const shift of parsed.shifts ?? []) {
+    fixObviousAmPmConfusion(shift, parsed.shift_type)
     if (!hasConsistentTimes(shift)) {
       shift.confidence = Math.min(shift.confidence, 0.4)
     }
     shift.notes = cleanNotes(shift.notes)
   }
   return { sheet: parsed, raw: response }
+}
+
+// The model occasionally outputs "04:30" when the sheet clearly shows "4:30 PM"
+// (16:30) and vice versa, despite the prompt rules. We can fix the obvious
+// cases server-side using two signals:
+//   1. shift_type tells us the typical hour windows (lunch vs dinner).
+//   2. start < end and (end - start) ∈ [2h, 14h] is the only sensible result.
+// If a row's times violate (2) but become consistent after flipping the
+// AM/PM half on start_time and/or end_time, apply the flip and lower
+// confidence so the manager double-checks.
+function fixObviousAmPmConfusion(
+  s: ExtractedShift,
+  sheetType: ExtractedSheet['shift_type']
+): void {
+  const start = parseHHMM(s.start_time)
+  const end = parseHHMM(s.end_time)
+  if (start == null || end == null) return
+
+  const flip = (mins: number): number => (mins < 12 * 60 ? mins + 12 * 60 : mins - 12 * 60)
+  const plausible = (a: number, b: number): boolean => {
+    if (b <= a) return false
+    const span = b - a
+    return span >= 2 * 60 && span <= 14 * 60
+  }
+  const fitsType = (a: number, b: number): boolean => {
+    if (sheetType === 'lunch') {
+      // Lunch shifts: starts 9–13, ends 13–17.
+      return a >= 9 * 60 && a <= 13 * 60 && b >= 13 * 60 && b <= 17 * 60
+    }
+    if (sheetType === 'dinner') {
+      // Dinner shifts: starts 14–19, ends 18–24.
+      return a >= 14 * 60 && a <= 19 * 60 && b >= 18 * 60 && b <= 24 * 60
+    }
+    // 'both' or null — accept any plausible window.
+    return true
+  }
+
+  // If the row already makes sense, leave it alone.
+  if (plausible(start, end) && fitsType(start, end)) return
+
+  // Try the four possible AM/PM flips and pick the one that fits the sheet
+  // type best, falling back to "just plausible" if no candidate fits.
+  const candidates: { start: number; end: number; flips: number }[] = [
+    { start, end, flips: 0 },
+    { start: flip(start), end, flips: 1 },
+    { start, end: flip(end), flips: 1 },
+    { start: flip(start), end: flip(end), flips: 2 },
+  ]
+  const fitting = candidates.find((c) => plausible(c.start, c.end) && fitsType(c.start, c.end))
+  const best = fitting ?? candidates.find((c) => plausible(c.start, c.end))
+  if (!best || best.flips === 0) return
+
+  s.start_time = formatHHMM(best.start)
+  s.end_time = formatHHMM(best.end)
+  s.confidence = Math.min(s.confidence, 0.6)
+  s.inferred_from_bracket = true // flag for review even if it wasn't originally
+}
+
+function parseHHMM(t: string | null): number | null {
+  if (!t) return null
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t)
+  if (!m) return null
+  const h = Number(m[1])
+  const min = Number(m[2])
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null
+  return h * 60 + min
+}
+
+function formatHHMM(mins: number): string {
+  const h = Math.floor(mins / 60) % 24
+  const m = mins % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 // Drops noise the model sometimes drops into the notes field: short fragments,

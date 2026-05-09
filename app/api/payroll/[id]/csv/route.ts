@@ -43,7 +43,19 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
       `# Mandarin Timesheet — ${period.start_date} to ${period.end_date}`,
     ].join(',')
   )
-  lines.push(['Employee', 'Rate', 'Shifts', 'Hours', 'Gross pay', 'Alcohol points'].join(','))
+  lines.push(
+    [
+      'Employee',
+      'Rate',
+      'Shifts',
+      'Hours',
+      'Gross pay',
+      'Meals',
+      'Meal deduction',
+      'Net pay',
+      'Alcohol points',
+    ].join(',')
+  )
   for (const r of summary.rows) {
     lines.push(
       [
@@ -52,6 +64,9 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
         r.shift_count.toString(),
         r.total_hours.toFixed(2),
         r.gross_pay.toFixed(2),
+        r.meal_count.toString(),
+        r.meal_deduction.toFixed(2),
+        r.net_pay.toFixed(2),
         r.alcohol_points.toString(),
       ].join(',')
     )
@@ -62,6 +77,9 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
       '',
       '',
       summary.total_hours.toFixed(2),
+      summary.total_gross_pay.toFixed(2),
+      '',
+      summary.total_meal_deduction.toFixed(2),
       summary.total_pay.toFixed(2),
       summary.total_alcohol_points.toString(),
     ].join(',')

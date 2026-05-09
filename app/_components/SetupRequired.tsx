@@ -1,7 +1,7 @@
 export function SetupRequired() {
   return (
-    <div className="rounded-lg border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-      <p className="font-medium">Supabase isn’t connected yet.</p>
+    <div className="surface border-l-2 border-l-amber-500 p-5 text-sm">
+      <p className="font-medium">Supabase isn't connected yet.</p>
       <ol className="mt-3 list-decimal space-y-1 pl-5">
         <li>
           Create a free Supabase project at{' '}

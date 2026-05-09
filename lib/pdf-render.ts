@@ -93,7 +93,7 @@ function drawHeader(doc: Doc, period: PayPeriod): void {
 }
 
 type Column = {
-  key: 'employee' | 'rate' | 'shifts' | 'hours' | 'gross' | 'alcohol'
+  key: 'employee' | 'rate' | 'shifts' | 'hours' | 'gross' | 'meal' | 'net' | 'alcohol'
   label: string
   width: number
   align: 'left' | 'right'
@@ -103,12 +103,14 @@ function buildColumns(doc: Doc): Column[] {
   const usable = doc.page.width - doc.page.margins.left - doc.page.margins.right
   // Ratios sum to 1.0
   const ratios = {
-    employee: 0.32,
-    rate: 0.13,
-    shifts: 0.11,
-    hours: 0.13,
-    gross: 0.17,
-    alcohol: 0.14,
+    employee: 0.24,
+    rate: 0.09,
+    shifts: 0.08,
+    hours: 0.1,
+    gross: 0.13,
+    meal: 0.11,
+    net: 0.13,
+    alcohol: 0.12,
   }
   return [
     { key: 'employee', label: 'Employee', width: usable * ratios.employee, align: 'left' },
@@ -116,6 +118,8 @@ function buildColumns(doc: Doc): Column[] {
     { key: 'shifts', label: 'Shifts', width: usable * ratios.shifts, align: 'right' },
     { key: 'hours', label: 'Hours', width: usable * ratios.hours, align: 'right' },
     { key: 'gross', label: 'Gross pay', width: usable * ratios.gross, align: 'right' },
+    { key: 'meal', label: 'Meal $', width: usable * ratios.meal, align: 'right' },
+    { key: 'net', label: 'Net pay', width: usable * ratios.net, align: 'right' },
     { key: 'alcohol', label: 'Alcohol pts', width: usable * ratios.alcohol, align: 'right' },
   ]
 }
@@ -209,6 +213,8 @@ function drawTable(doc: Doc, summary: BiweeklySummary): void {
       shifts: r.shift_count.toString(),
       hours: r.total_hours.toFixed(2),
       gross: `$${r.gross_pay.toFixed(2)}`,
+      meal: r.meal_count > 0 ? `−$${r.meal_deduction.toFixed(2)}` : '—',
+      net: `$${r.net_pay.toFixed(2)}`,
       alcohol: r.alcohol_points.toString(),
     }
 
@@ -252,7 +258,9 @@ function drawTable(doc: Doc, summary: BiweeklySummary): void {
     rate: '',
     shifts: '',
     hours: summary.total_hours.toFixed(2),
-    gross: `$${summary.total_pay.toFixed(2)}`,
+    gross: `$${summary.total_gross_pay.toFixed(2)}`,
+    meal: `−$${summary.total_meal_deduction.toFixed(2)}`,
+    net: `$${summary.total_pay.toFixed(2)}`,
     alcohol: summary.total_alcohol_points.toString(),
   }
 

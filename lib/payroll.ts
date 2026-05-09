@@ -40,10 +40,32 @@ export function shiftPaidHours(
   return shiftPaidMinutes(shift) / 60
 }
 
-export function shiftPay(
+/**
+ * Flat dollar amount deducted from the shift's pay when the employee took
+ * a meal during the shift (typical staff-meal charge).
+ */
+export const MEAL_DEDUCTION = 2
+
+/** Returns the meal deduction for a single shift ($0 or $MEAL_DEDUCTION). */
+export function shiftMealDeduction(shift: Pick<Shift, 'meal_provided'>): number {
+  return shift.meal_provided ? MEAL_DEDUCTION : 0
+}
+
+/** Gross pay before the meal deduction. */
+export function shiftGrossPay(
   shift: Pick<Shift, 'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes' | 'hourly_rate_snapshot'>
 ): number {
   return roundCurrency(shiftPaidHours(shift) * (shift.hourly_rate_snapshot ?? 0))
+}
+
+/** Net pay after the meal deduction. Floor at $0 for tiny shifts. */
+export function shiftPay(
+  shift: Pick<
+    Shift,
+    'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes' | 'hourly_rate_snapshot' | 'meal_provided'
+  >
+): number {
+  return roundCurrency(Math.max(0, shiftGrossPay(shift) - shiftMealDeduction(shift)))
 }
 
 export function roundCurrency(n: number): number {
@@ -70,16 +92,25 @@ export type DailySummaryRow = {
   hourly_rate: number
   paid_minutes: number
   paid_hours: number
+  /** Pay BEFORE the meal deduction. */
+  gross_pay: number
+  /** Total meal deductions for this employee on this day ($2 per meal shift). */
+  meal_deduction: number
+  /** Net pay AFTER the meal deduction. */
   pay: number
   shift_count: number
+  meal_count: number
 }
 
 export type DailySummary = {
   rows: DailySummaryRow[]
   total_minutes: number
   total_hours: number
+  total_gross_pay: number
+  total_meal_deduction: number
   total_pay: number
   shift_count: number
+  meal_count: number
   exception_count: number
 }
 
@@ -90,23 +121,32 @@ export type DailySummary = {
 export function summarizeDay(shifts: Shift[]): DailySummary {
   const byEmployee = new Map<string, DailySummaryRow>()
   let totalMinutes = 0
-  let totalPay = 0
+  let totalGross = 0
+  let totalMealDeduction = 0
   let exceptions = 0
+  let totalMealCount = 0
 
   for (const s of shifts) {
     if (s.needs_review) exceptions += 1
     const key = s.employee_id ?? `__name__:${s.employee_name_snapshot.toLowerCase()}`
     const minutes = shiftPaidMinutes(s)
-    const pay = roundCurrency((minutes / 60) * s.hourly_rate_snapshot)
+    const gross = shiftGrossPay(s)
+    const deduction = shiftMealDeduction(s)
+    const net = roundCurrency(Math.max(0, gross - deduction))
     totalMinutes += minutes
-    totalPay = roundCurrency(totalPay + pay)
+    totalGross = roundCurrency(totalGross + gross)
+    totalMealDeduction = roundCurrency(totalMealDeduction + deduction)
+    if (s.meal_provided) totalMealCount += 1
 
     const existing = byEmployee.get(key)
     if (existing) {
       existing.paid_minutes += minutes
       existing.paid_hours = roundHours(existing.paid_minutes / 60)
-      existing.pay = roundCurrency(existing.pay + pay)
+      existing.gross_pay = roundCurrency(existing.gross_pay + gross)
+      existing.meal_deduction = roundCurrency(existing.meal_deduction + deduction)
+      existing.pay = roundCurrency(Math.max(0, existing.gross_pay - existing.meal_deduction))
       existing.shift_count += 1
+      if (s.meal_provided) existing.meal_count += 1
     } else {
       byEmployee.set(key, {
         employee_id: s.employee_id,
@@ -114,8 +154,11 @@ export function summarizeDay(shifts: Shift[]): DailySummary {
         hourly_rate: s.hourly_rate_snapshot,
         paid_minutes: minutes,
         paid_hours: roundHours(minutes / 60),
-        pay,
+        gross_pay: gross,
+        meal_deduction: deduction,
+        pay: net,
         shift_count: 1,
+        meal_count: s.meal_provided ? 1 : 0,
       })
     }
   }
@@ -124,12 +167,17 @@ export function summarizeDay(shifts: Shift[]): DailySummary {
     a.employee_name.localeCompare(b.employee_name)
   )
 
+  const totalNet = roundCurrency(Math.max(0, totalGross - totalMealDeduction))
+
   return {
     rows,
     total_minutes: totalMinutes,
     total_hours: roundHours(totalMinutes / 60),
-    total_pay: totalPay,
+    total_gross_pay: totalGross,
+    total_meal_deduction: totalMealDeduction,
+    total_pay: totalNet,
     shift_count: shifts.length,
+    meal_count: totalMealCount,
     exception_count: exceptions,
   }
 }
@@ -142,8 +190,14 @@ export type BiweeklyRow = {
   hourly_rate: number       // most recent rate seen
   total_minutes: number
   total_hours: number
+  /** Pay BEFORE meal deductions. */
   gross_pay: number
+  /** Total $ deducted across the period for meals taken. */
+  meal_deduction: number
+  /** Net pay paid out (gross_pay − meal_deduction, floored at $0). */
+  net_pay: number
   shift_count: number
+  meal_count: number
   alcohol_points: number
   /** Day-by-day breakdown keyed by ISO date. */
   by_date: Record<string, { minutes: number; pay: number; alcohol_points: number }>
@@ -153,6 +207,8 @@ export type BiweeklySummary = {
   rows: BiweeklyRow[]
   dates: string[]                    // sorted ascending
   total_hours: number
+  total_gross_pay: number
+  total_meal_deduction: number
   total_pay: number
   total_alcohol_points: number
 }
@@ -167,7 +223,8 @@ export function summarizePayPeriod(days: DaySheetWithChildren[]): BiweeklySummar
   const byEmployee = new Map<string, BiweeklyRow>()
   const dateSet = new Set<string>()
   let totalMinutes = 0
-  let totalPay = 0
+  let totalGross = 0
+  let totalMealDeduction = 0
   let totalPoints = 0
 
   for (const day of days) {
@@ -176,20 +233,26 @@ export function summarizePayPeriod(days: DaySheetWithChildren[]): BiweeklySummar
     for (const s of day.shifts) {
       const key = s.employee_id ?? `__name__:${s.employee_name_snapshot.toLowerCase()}`
       const minutes = shiftPaidMinutes(s)
-      const pay = roundCurrency((minutes / 60) * s.hourly_rate_snapshot)
+      const gross = shiftGrossPay(s)
+      const deduction = shiftMealDeduction(s)
+      const net = roundCurrency(Math.max(0, gross - deduction))
       totalMinutes += minutes
-      totalPay = roundCurrency(totalPay + pay)
+      totalGross = roundCurrency(totalGross + gross)
+      totalMealDeduction = roundCurrency(totalMealDeduction + deduction)
 
       const row = ensureBiweeklyRow(byEmployee, key, s)
       row.total_minutes += minutes
       row.total_hours = roundHours(row.total_minutes / 60)
-      row.gross_pay = roundCurrency(row.gross_pay + pay)
+      row.gross_pay = roundCurrency(row.gross_pay + gross)
+      row.meal_deduction = roundCurrency(row.meal_deduction + deduction)
+      row.net_pay = roundCurrency(Math.max(0, row.gross_pay - row.meal_deduction))
       row.shift_count += 1
+      if (s.meal_provided) row.meal_count += 1
       row.hourly_rate = s.hourly_rate_snapshot
 
       const cell = (row.by_date[day.sheet_date] ??= { minutes: 0, pay: 0, alcohol_points: 0 })
       cell.minutes += minutes
-      cell.pay = roundCurrency(cell.pay + pay)
+      cell.pay = roundCurrency(cell.pay + net)
     }
 
     for (const a of day.alcohol_sales) {
@@ -208,13 +271,17 @@ export function summarizePayPeriod(days: DaySheetWithChildren[]): BiweeklySummar
     }
   }
 
+  const totalNet = roundCurrency(Math.max(0, totalGross - totalMealDeduction))
+
   return {
     rows: Array.from(byEmployee.values()).sort((a, b) =>
       a.employee_name.localeCompare(b.employee_name)
     ),
     dates: Array.from(dateSet).sort(),
     total_hours: roundHours(totalMinutes / 60),
-    total_pay: totalPay,
+    total_gross_pay: totalGross,
+    total_meal_deduction: totalMealDeduction,
+    total_pay: totalNet,
     total_alcohol_points: totalPoints,
   }
 }
@@ -233,7 +300,10 @@ function ensureBiweeklyRow(
       total_minutes: 0,
       total_hours: 0,
       gross_pay: 0,
+      meal_deduction: 0,
+      net_pay: 0,
       shift_count: 0,
+      meal_count: 0,
       alcohol_points: 0,
       by_date: {},
     }

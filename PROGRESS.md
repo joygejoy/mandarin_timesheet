@@ -99,42 +99,118 @@ by server.
       *(parallel-agent delivery — see `.agent-reports/google-sheets.md`;
       UI button still pending — see "What the manager needs to do")*
 
+### Done this session (2026-05-09)
+
+Roster & wages
+- [x] **xlsx import handles multi-section sheets** — parser detects the name
+      column from the header row, skips header rows mid-file, `TOTAL`/`Sum`
+      rows, and rows where the chosen name cell is empty/numeric. Verified on
+      a 47-row "server and busboy.xlsx" (servers + busboys + Wayne).
+- [x] **Robust dedupe across re-imports** — new `lib/normalize.ts` collapses
+      case, punctuation, whitespace, and diacritics. `Lisa F` / `lisa  f.` /
+      `LISA-F` / `Lísa F` all merge. Dedupe now includes inactive employees
+      so deactivate-then-re-import never spawns a second row.
+- [x] **Ontario wage presets** in `lib/wages.ts` (Min $17.60, Student $16.60,
+      Custom). New `WageSelect` component used in `EmployeeForm` and the
+      bulk-import preview; default rate everywhere bumped from $17.50 →
+      $17.60.
+- [x] **Inline wage dropdown on employee row** (`InlineWageEditor`) — pick
+      Min/Student to auto-save, Custom reveals an inline number input. Toggles
+      in one click without navigating to the detail page.
+- [x] **Bulk delete + reset** — `Select` mode with checkboxes, `Delete N`,
+      `Delete all`, and `Reset wages → min` all wired to new server actions
+      (`deleteEmployees`, `deleteAllEmployees`, `setAllWagesToMinimum`).
+
+Employees page UX
+- [x] **Apple-Contacts-then-pages refactor** — list is now a flat
+      alphabetical `EmployeesClient` with **10 employees per page**, Prev/Next
+      buttons, page-jump select, A–Z jump rail (clicking a letter sets the
+      page containing that letter). Search by name OR role resets to page 1.
+      Avatar circle dropped per request; row shows index, name, role/break/
+      meal subline, wage editor, hover Deactivate/Delete.
+
+Daily-sheet OCR (scan review)
+- [x] **Per-cell highlighting** — `CellShell` wraps each cell with an amber
+      tint when OCR is uncertain or rose when a required field is empty;
+      `ReviewHint` shows `⚠ check time (model: 4:30 PM)` inline. Confidence
+      threshold unified at <0.8 so flagged rows always have visible cells.
+- [x] **Confirm button** — promoted from a quiet pill to a filled blue
+      "✓ Confirm" button, paired with a one-line `verify: start, end` summary
+      so the user knows which columns to look at before clicking.
+- [x] **Section column dropped** from scan review — manager couldn't edit it
+      meaningfully and it cluttered the table. Section is still extracted by
+      the model and saved to the DB; per-shift editor on the daily sheet
+      detail keeps it editable.
+- [x] **Notes column collapses** to a small `📝` icon button (blue when the
+      row already has notes); click expands an inline input that auto-focuses
+      and collapses on blur/Enter/Escape.
+- [x] **Sheet-order preservation** — added `display_order int` column
+      (`migration 0002_shift_display_order.sql`), populated on save with the
+      OCR row index. Daily-sheet detail sorts by `display_order` →
+      `start_time` → `created_at` in JS so it works whether or not the
+      migration has been applied. Save action retries without the column on
+      schema-cache errors.
+- [x] **OCR prompt: top-to-bottom rule** — explicit "DO NOT alphabetize, DO
+      NOT group by section, DO NOT sort by start_time" instruction at the top
+      of the system prompt.
+- [x] **Auto-correct AM/PM confusion** — server-side `fixObviousAmPmConfusion`
+      flips obvious 4:30 → 16:30 cases using `shift_type` (lunch vs dinner)
+      windows, then lowers confidence so the manager spot-checks.
+
+Payroll
+- [x] **$2 meal deduction** — `MEAL_DEDUCTION = 2`, helpers `shiftGrossPay`,
+      `shiftMealDeduction`, `shiftPay` (now returns NET). Daily/biweekly
+      summaries expose `gross_pay`, `meal_deduction`, `net_pay`,
+      `meal_count`. Per-shift "Pay" cell shows `−$2.00 meal` underneath the
+      dollar amount when the meal box is checked; payroll detail table gains
+      `Meal $` and `Net pay` columns; CSV/PDF/Sheets exports all updated.
+- [x] **Lazy-load original sheet photo** — new `/api/sheets/[id]/scan-url`
+      route + `ScanPhotoPanel` client component fetches the signed URL only
+      when the dropdown is opened. Daily-sheet page no longer pays the
+      signing roundtrip on every load.
+
+Daily shifts page
+- [x] **Clearer "Open the day"** — primary `→ Open today` button (single
+      click, today pre-filled in a hidden field), secondary date picker for
+      any other date, helper copy explaining "opens existing or creates new".
+- [x] **Filter & sort toolbar** — date filter (substring match — typing
+      `2026-05` matches a whole month), sort toggle (Newest first / Oldest
+      first), `Clear` link when filtered, `Showing N of M` count.
+- [x] **`Open →` row buttons** instead of the small text link.
+
+Notion-style UI refresh
+- [x] **Tokens in `globals.css`** — off-white `--background`, hairline
+      `--border`, accent blue, plus utilities `surface`, `dot`, `link-soft`,
+      and quieter `btn-primary`/`btn-secondary`/`btn-ghost`.
+- [x] **Flat sidebar** with usePathname-based active state; quiet status dots
+      replacing colored pills across `/employees`, `/shifts`, `/payroll`.
+- [x] Refactored `/`, `/employees`, `/employees/import`, `/scan`, `/shifts`,
+      `/shifts/[id]`, `/payroll`, `/payroll/[id]`, `/alcohol`, employee form
+      to the same chrome-light surface/dot pattern.
+
+Other
+- [x] Reinstalled `pdfkit` (was missing from `package.json`, breaking the
+      payroll PDF download with `Module not found: pdfkit/js/pdfkit.standalone`).
+      Standalone bundle confirmed at
+      `node_modules/pdfkit/js/pdfkit.standalone.js`.
+
 ### Not yet built
 
-- [ ] **Auth + RLS policies** so multiple managers can share the app safely
-- [ ] **Push to Vercel** (deploy prep is done; user actually triggers the deploy)
+- [ ] **Auth + RLS policies** so multiple managers can share the app safely.
+- [ ] **Push to Vercel** (deploy prep is done; user actually triggers the deploy).
+- [ ] **Alcohol points in the scan flow** — discussed: per-row columns would
+      be confusing for multi-shift servers; better path is a separate
+      "Alcohol points" panel below the shifts table on the scan review
+      screen, deduped per server. Awaiting user go-ahead.
 
-PDF export, Google Sheets push, and the UI buttons that wire all three
-download paths into `/payroll/[id]` are now done — see
-`.agent-reports/pdf-export.md` and `.agent-reports/google-sheets.md`.
+## Migrations to apply
 
-## Next time — open issues to tackle
+If you haven't yet, run this in your Supabase SQL editor:
 
-These came up during testing on real sheets and are not yet fixed:
-
-1. **Employee OCR still picks up some non-names.** Specifically "Dining
-   Room" was extracted as if it were a name. The current blocklist in
-   `lib/openai.ts > NON_NAME_BLOCKLIST` doesn't include room/area
-   labels. Add: "dining room", "kitchen", "bar", "patio", "host stand",
-   plus a more general rule: drop any candidate whose tokens are all
-   common-noun room/area words.
-2. **Shift OCR misses or mangles some times.** On real scans, some
-   start/end times come out wrong or null even when the photo is
-   readable. Likely contributors:
-   - The model sometimes confuses "4:30" with "16:30" inconsistently —
-     the prompt says "restaurant context, write 4:30 as 16:30" but the
-     model occasionally outputs `04:30`. Tighten the prompt with
-     explicit examples per shift type (lunch sheet morning vs. dinner
-     evening).
-   - When a cell has bracket notation, the model occasionally drops
-     the time on the FIRST row of the bracket while filling later
-     rows. Add an explicit instruction: "the row where the bracket
-     STARTS gets the same time as the rows below it".
-   - Photo quality: very low contrast or skewed shots produce missing
-     fields. The client-side downscale to 2000px may be losing detail
-     on dense sheets — consider raising to 2500px.
-3. **Auth + RLS** still not done. Vercel Deployment Protection is the
-   stopgap (documented in README and the Vercel report).
+- `supabase/migrations/0002_shift_display_order.sql` — adds the
+  `display_order` column the OCR scan uses to preserve sheet row order.
+  The app falls back gracefully without it (sorting by start_time), so this
+  is optional but recommended.
 
 ## Next steps (recommended order)
 

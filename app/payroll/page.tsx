@@ -28,22 +28,21 @@ export default async function PayrollPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <header className="pb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Payroll</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+      <header className="pb-8">
+        <h1 className="text-3xl font-semibold tracking-tight">Payroll</h1>
+        <p className="mt-1 text-sm text-[color:var(--muted)]">
           Each pay period is two weeks. Add daily sheets inside a period; close it when ready to export.
         </p>
       </header>
 
-      <section className="mb-8 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="mb-3 text-sm font-medium">Start a new pay period</h2>
+      <section className="surface mb-8 p-4">
         <form action={createPayPeriod} className="flex flex-wrap items-end gap-3">
           <label className="block text-sm">
-            <span className="mb-1 block text-zinc-600 dark:text-zinc-400">Start</span>
+            <span className="mb-1 block text-xs text-[color:var(--muted)]">Start</span>
             <input type="date" name="start_date" required defaultValue={next.start} className="input" />
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block text-zinc-600 dark:text-zinc-400">End</span>
+            <span className="mb-1 block text-xs text-[color:var(--muted)]">End</span>
             <input type="date" name="end_date" required defaultValue={next.end} className="input" />
           </label>
           <button className="btn-primary" type="submit">
@@ -53,7 +52,7 @@ export default async function PayrollPage() {
       </section>
 
       {!periods || periods.length === 0 ? (
-        <p className="text-sm text-zinc-500">No pay periods yet.</p>
+        <p className="text-sm text-[color:var(--muted)]">No pay periods yet.</p>
       ) : (
         <PeriodList rows={periods as PayPeriod[]} />
       )}
@@ -63,28 +62,28 @@ export default async function PayrollPage() {
 
 function PeriodList({ rows }: { rows: PayPeriod[] }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="surface overflow-hidden">
       <table className="min-w-full text-sm">
-        <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-800/50">
+        <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
           <tr>
-            <th className="px-4 py-3 font-medium">Period</th>
-            <th className="px-4 py-3 font-medium">Status</th>
-            <th className="px-4 py-3 font-medium" />
+            <th className="px-3 py-2.5 font-normal">Period</th>
+            <th className="px-3 py-2.5 font-normal">Status</th>
+            <th className="px-3 py-2.5" />
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <tbody className="divide-y divide-[color:var(--border)]">
           {rows.map((p) => (
             <tr key={p.id}>
-              <td className="px-4 py-3 font-medium">
-                <Link href={`/payroll/${p.id}`} className="hover:underline">
+              <td className="px-3 py-2.5 font-medium">
+                <Link href={`/payroll/${p.id}`} className="link-soft">
                   {fmtRange(p.start_date, p.end_date)}
                 </Link>
               </td>
-              <td className="px-4 py-3">
-                <StatusBadge status={p.status} />
+              <td className="px-3 py-2.5">
+                <StatusDot status={p.status} />
               </td>
-              <td className="px-4 py-3 text-right">
-                <Link href={`/payroll/${p.id}`} className="text-xs text-zinc-500 hover:underline">
+              <td className="px-3 py-2.5 text-right">
+                <Link href={`/payroll/${p.id}`} className="text-xs text-[color:var(--muted)] hover:text-[color:var(--foreground)]">
                   Open
                 </Link>
               </td>
@@ -96,14 +95,19 @@ function PeriodList({ rows }: { rows: PayPeriod[] }) {
   )
 }
 
-function StatusBadge({ status }: { status: PayPeriod['status'] }) {
-  const cls =
+function StatusDot({ status }: { status: PayPeriod['status'] }) {
+  const color =
     status === 'open'
-      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
+      ? 'bg-emerald-500'
       : status === 'closed'
-      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
-      : 'bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${cls}`}>{status}</span>
+      ? 'bg-zinc-400 dark:bg-zinc-600'
+      : 'bg-amber-500'
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-[color:var(--muted)]">
+      <span className={`dot ${color}`} aria-hidden />
+      {status}
+    </span>
+  )
 }
 
 function fmtRange(start: string, end: string) {

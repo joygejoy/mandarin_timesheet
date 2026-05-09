@@ -60,11 +60,11 @@ export default async function AlcoholPage({
 
   return (
     <div className="mx-auto max-w-5xl">
-      <header className="pb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Alcohol sales</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Drink-point leaderboard for a pay period. Enter daily totals on each day’s sheet at{' '}
-          <Link href="/shifts" className="underline">
+      <header className="pb-8">
+        <h1 className="text-3xl font-semibold tracking-tight">Alcohol sales</h1>
+        <p className="mt-1 text-sm text-[color:var(--muted)]">
+          Drink-point leaderboard for a pay period. Enter daily totals on each day's sheet at{' '}
+          <Link href="/shifts" className="link-soft">
             Daily shifts
           </Link>
           .
@@ -78,7 +78,7 @@ export default async function AlcoholPage({
           <PeriodPicker periods={periodList} activeId={activePeriod?.id ?? null} />
 
           {!summary ? null : ranked.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900">
+            <p className="surface border-dashed p-8 text-center text-sm text-[color:var(--muted)]">
               No alcohol points logged in this period yet.
             </p>
           ) : (
@@ -101,8 +101,8 @@ function PeriodPicker({
   activeId: string | null
 }) {
   return (
-    <form className="mb-6 flex items-center gap-3" action="/alcohol">
-      <label className="text-sm text-zinc-500">Pay period</label>
+    <form className="mb-8 flex items-center gap-3" action="/alcohol">
+      <label className="text-sm text-[color:var(--muted)]">Pay period</label>
       <select name="period" defaultValue={activeId ?? undefined} className="input max-w-xs">
         {periods.map((p) => (
           <option key={p.id} value={p.id}>
@@ -125,27 +125,27 @@ function Podium({
 }) {
   // Order on screen left→right: 2nd, 1st, 3rd. (Classic podium).
   const slots: { rank: number; row?: (typeof ranked)[number]; medal: string; height: string; emphasis: string }[] = [
-    { rank: 2, row: ranked[1], medal: '🥈', height: 'h-28', emphasis: 'border-zinc-300' },
-    { rank: 1, row: ranked[0], medal: '🥇', height: 'h-36', emphasis: 'border-amber-400 bg-amber-50 dark:bg-amber-950/30' },
-    { rank: 3, row: ranked[2], medal: '🥉', height: 'h-24', emphasis: 'border-orange-300' },
+    { rank: 2, row: ranked[1], medal: '2nd', height: 'h-28', emphasis: '' },
+    { rank: 1, row: ranked[0], medal: '1st', height: 'h-36', emphasis: 'ring-1 ring-amber-400/70' },
+    { rank: 3, row: ranked[2], medal: '3rd', height: 'h-24', emphasis: '' },
   ]
   return (
     <section className="mb-8">
-      <h2 className="mb-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">Top sellers</h2>
+      <h2 className="mb-3 text-sm text-[color:var(--muted)]">Top sellers</h2>
       <div className="grid grid-cols-3 items-end gap-3">
         {slots.map(({ rank, row, medal, height, emphasis }) => (
           <div
             key={rank}
-            className={`flex ${height} flex-col items-center justify-end rounded-lg border-2 p-3 text-center ${emphasis} bg-white dark:bg-zinc-900`}
+            className={`surface flex ${height} flex-col items-center justify-end p-3 text-center ${emphasis}`}
           >
             {row ? (
               <>
-                <span className="text-2xl">{medal}</span>
+                <span className="text-xs uppercase tracking-wide text-[color:var(--muted)]">{medal}</span>
                 <p className="mt-2 text-sm font-medium">{row.employee_name}</p>
                 <p className="text-lg font-semibold tabular-nums">{row.alcohol_points} pts</p>
               </>
             ) : (
-              <span className="text-xs text-zinc-400">—</span>
+              <span className="text-xs text-[color:var(--muted)]">—</span>
             )}
           </div>
         ))}
@@ -164,36 +164,36 @@ function Table({
 }) {
   return (
     <section>
-      <h2 className="mb-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">Full ranking</h2>
-      <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <h2 className="mb-3 text-sm text-[color:var(--muted)]">Full ranking</h2>
+      <div className="surface overflow-hidden">
         <table className="min-w-full text-sm">
-          <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-800/50">
+          <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
             <tr>
-              <th className="w-10 px-3 py-3 font-medium">#</th>
-              <th className="px-3 py-3 font-medium">Server</th>
-              <th className="px-3 py-3 font-medium text-right">Total points</th>
-              <th className="px-3 py-3 font-medium text-right">% of period</th>
+              <th className="w-10 px-3 py-2.5 font-normal">#</th>
+              <th className="px-3 py-2.5 font-normal">Server</th>
+              <th className="px-3 py-2.5 font-normal text-right">Total points</th>
+              <th className="px-3 py-2.5 font-normal text-right">% of period</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <tbody className="divide-y divide-[color:var(--border)]">
             {ranked.map((r, i) => {
               const pct = totalPoints > 0 ? (r.alcohol_points / totalPoints) * 100 : 0
               return (
                 <tr key={r.employee_name + i}>
-                  <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
-                  <td className="px-3 py-2 font-medium">{r.employee_name}</td>
-                  <td className="px-3 py-2 text-right font-semibold tabular-nums">{r.alcohol_points}</td>
-                  <td className="px-3 py-2 text-right text-zinc-500 tabular-nums">{pct.toFixed(1)}%</td>
+                  <td className="px-3 py-2.5 text-[color:var(--muted)] tabular-nums">{i + 1}</td>
+                  <td className="px-3 py-2.5 font-medium">{r.employee_name}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{r.alcohol_points}</td>
+                  <td className="px-3 py-2.5 text-right text-[color:var(--muted)] tabular-nums">{pct.toFixed(1)}%</td>
                 </tr>
               )
             })}
           </tbody>
-          <tfoot className="bg-zinc-50 dark:bg-zinc-800/50">
+          <tfoot className="border-t border-[color:var(--border)]">
             <tr>
-              <td className="px-3 py-2" />
-              <td className="px-3 py-2 text-xs uppercase tracking-wide text-zinc-500">Period total</td>
-              <td className="px-3 py-2 text-right font-semibold tabular-nums">{totalPoints}</td>
-              <td className="px-3 py-2" />
+              <td className="px-3 py-2.5" />
+              <td className="px-3 py-2.5 text-xs text-[color:var(--muted)]">Period total</td>
+              <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{totalPoints}</td>
+              <td className="px-3 py-2.5" />
             </tr>
           </tfoot>
         </table>
@@ -204,7 +204,7 @@ function Table({
 
 function NoPeriods() {
   return (
-    <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900">
+    <div className="surface border-dashed p-8 text-center text-sm text-[color:var(--muted)]">
       <p>No pay periods yet.</p>
       <Link href="/payroll" className="btn-primary mt-4 inline-flex">
         Create a pay period

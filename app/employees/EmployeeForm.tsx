@@ -1,3 +1,8 @@
+'use client'
+
+import { useState } from 'react'
+import { WageSelect } from '@/app/_components/WageSelect'
+import { DEFAULT_WAGE_RATE } from '@/lib/wages'
 import type { Employee } from '@/lib/types/db'
 
 type Props = {
@@ -8,6 +13,8 @@ type Props = {
 
 export function EmployeeForm({ action, employee, submitLabel }: Props) {
   const e = employee
+  const [rate, setRate] = useState<number>(e?.hourly_rate ?? DEFAULT_WAGE_RATE)
+
   return (
     <form action={action} className="grid max-w-xl gap-4">
       <Field label="Full name" required>
@@ -20,22 +27,35 @@ export function EmployeeForm({ action, employee, submitLabel }: Props) {
         />
       </Field>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Role">
-          <input name="role" defaultValue={e?.role ?? ''} className="input" />
-        </Field>
-        <Field label="Hourly rate ($)" required>
-          <input
-            name="hourly_rate"
-            type="number"
-            step="0.01"
-            min="0"
-            required
-            defaultValue={e?.hourly_rate ?? 17.5}
-            className="input"
+      <Field label="Role">
+        <input name="role" defaultValue={e?.role ?? ''} className="input" />
+      </Field>
+
+      <Field label="Hourly rate" required>
+        <div className="flex items-center gap-2">
+          <WageSelect
+            rate={rate}
+            onChange={({ rate: next }) => setRate(next)}
+            className="max-w-[16rem]"
           />
-        </Field>
-      </div>
+          <div className="inline-flex items-center gap-1">
+            <span className="text-[color:var(--muted)]">$</span>
+            <input
+              name="hourly_rate"
+              type="number"
+              step="0.01"
+              min="0"
+              required
+              value={rate.toFixed(2)}
+              onChange={(ev) => setRate(Number(ev.target.value))}
+              className="input w-24 text-right tabular-nums"
+            />
+          </div>
+        </div>
+        <p className="mt-1 text-xs text-[color:var(--muted)]">
+          Ontario minimum wage $17.60 · student wage $16.60. Pick Custom to enter any other rate.
+        </p>
+      </Field>
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Age">
@@ -101,7 +121,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+      <span className="mb-1 block text-xs text-[color:var(--muted)]">
         {label}
         {required && <span className="ml-0.5 text-rose-500">*</span>}
       </span>

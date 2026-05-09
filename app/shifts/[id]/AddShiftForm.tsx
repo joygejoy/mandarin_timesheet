@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from 'react'
 import { EmployeeCombobox } from '@/app/_components/EmployeeCombobox'
+import { DEFAULT_WAGE_RATE } from '@/lib/wages'
 import type { Employee } from '@/lib/types/db'
 
 export function AddShiftForm({
@@ -16,7 +17,7 @@ export function AddShiftForm({
   const formRef = useRef<HTMLFormElement>(null)
   const [employeeId, setEmployeeId] = useState<string | null>(employees[0]?.id ?? null)
   const [name, setName] = useState<string>(employees[0]?.full_name ?? '')
-  const [rate, setRate] = useState<number>(employees[0]?.hourly_rate ?? 17.5)
+  const [rate, setRate] = useState<number>(employees[0]?.hourly_rate ?? DEFAULT_WAGE_RATE)
   const [role, setRole] = useState<string>(employees[0]?.role ?? '')
   const [breakMin, setBreakMin] = useState<number>(employees[0]?.default_break_minutes ?? 0)
   const [meal, setMeal] = useState<boolean>(employees[0]?.default_meal_provided ?? false)
@@ -39,7 +40,7 @@ export function AddShiftForm({
     // Custom typed name
     setEmployeeId(null)
     setName(picked.label)
-    setRate(17.5)
+    setRate(DEFAULT_WAGE_RATE)
     setRole('')
     setBreakMin(0)
     setMeal(false)
@@ -78,7 +79,7 @@ export function AddShiftForm({
     <form
       ref={formRef}
       onSubmit={onSubmit}
-      className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+      className="surface p-4"
     >
       <div className="grid gap-3 sm:grid-cols-6">
         <div className="sm:col-span-2">

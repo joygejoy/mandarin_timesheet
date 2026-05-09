@@ -1,9 +1,8 @@
-import Link from 'next/link'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { SetupRequired } from '@/app/_components/SetupRequired'
-import { isoDate } from '@/lib/payroll'
-import { summarizeDay } from '@/lib/payroll'
+import { isoDate, summarizeDay } from '@/lib/payroll'
 import { createDailySheet } from './actions'
+import { SheetsClient, type SheetRow } from './SheetsClient'
 import type { DailySheet, Shift } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -29,102 +28,92 @@ export default async function ShiftsPage() {
   if (error) throw new Error(error.message)
   const sheets = (data ?? []) as SheetWithShifts[]
   const today = isoDate(new Date())
+  const todaySheetId = sheets.find((s) => s.sheet_date === today)?.id ?? null
+
+  // Pre-summarize on the server so the client component doesn't need the full shift rows.
+  const rows: SheetRow[] = sheets.map((s) => {
+    const sum = summarizeDay(s.shifts)
+    return {
+      id: s.id,
+      sheet_date: s.sheet_date,
+      status: s.status,
+      pay_period_id: s.pay_period_id,
+      shift_count: sum.shift_count,
+      total_hours: sum.total_hours,
+      total_pay: sum.total_pay,
+    }
+  })
 
   return (
     <div className="mx-auto max-w-4xl">
-      <header className="pb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Daily shifts</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          One sheet per calendar day. Pick a date to start a new sheet (or jump to an existing one).
+      <header className="pb-8">
+        <h1 className="text-3xl font-semibold tracking-tight">Daily shifts</h1>
+        <p className="mt-1 text-sm text-[color:var(--muted)]">
+          One sheet per calendar day. Open today below, or jump to any past date — sheets
+          are created on first open.
         </p>
       </header>
 
-      <section className="mb-8 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="mb-3 text-sm font-medium">Open or create a day</h2>
-        <form action={createDailySheet} className="flex flex-wrap items-end gap-3">
-          <label className="block text-sm">
-            <span className="mb-1 block text-zinc-600 dark:text-zinc-400">Date</span>
-            <input type="date" name="sheet_date" required defaultValue={today} className="input" />
-          </label>
+      <OpenDayPanel today={today} todaySheetId={todaySheetId} />
+
+      <section className="mt-10">
+        <h2 className="mb-3 text-sm font-medium text-[color:var(--muted)]">All daily sheets</h2>
+        <SheetsClient sheets={rows} />
+      </section>
+    </div>
+  )
+}
+
+function OpenDayPanel({
+  today,
+  todaySheetId,
+}: {
+  today: string
+  todaySheetId: string | null
+}) {
+  return (
+    <section className="surface p-5">
+      <h2 className="text-base font-semibold">Open a day</h2>
+      <p className="mt-1 text-xs text-[color:var(--muted)]">
+        Click <strong>Open today</strong> for {fmtDateLong(today)}, or pick any other date and click{' '}
+        <strong>Open</strong>. If a sheet already exists for that date you'll jump to it; otherwise a new draft is created.
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-end gap-4">
+        {/* Primary action: today, single-click */}
+        <form action={createDailySheet}>
+          <input type="hidden" name="sheet_date" value={today} />
           <button className="btn-primary" type="submit">
-            Open sheet
+            {todaySheetId ? '→ Open today' : '+ Open today'}
           </button>
         </form>
-      </section>
 
-      {sheets.length === 0 ? (
-        <p className="text-sm text-zinc-500">No daily sheets yet. Open today’s above.</p>
-      ) : (
-        <SheetList sheets={sheets} />
-      )}
-    </div>
+        <span className="hidden text-xs text-[color:var(--muted)] sm:inline">or pick a date:</span>
+
+        <form action={createDailySheet} className="flex flex-wrap items-end gap-2">
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs text-[color:var(--muted)]">Date</span>
+            <input
+              type="date"
+              name="sheet_date"
+              required
+              defaultValue={today}
+              className="input"
+            />
+          </label>
+          <button className="btn-secondary" type="submit">
+            Open
+          </button>
+        </form>
+      </div>
+    </section>
   )
-}
-
-function SheetList({ sheets }: { sheets: SheetWithShifts[] }) {
-  return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <table className="min-w-full text-sm">
-        <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-800/50">
-          <tr>
-            <th className="px-4 py-3 font-medium">Date</th>
-            <th className="px-4 py-3 font-medium">Status</th>
-            <th className="px-4 py-3 font-medium text-right">Shifts</th>
-            <th className="px-4 py-3 font-medium text-right">Hours</th>
-            <th className="px-4 py-3 font-medium text-right">Pay</th>
-            <th className="px-4 py-3" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {sheets.map((s) => {
-            const summary = summarizeDay(s.shifts)
-            return (
-              <tr key={s.id}>
-                <td className="px-4 py-3 font-medium">
-                  <Link href={`/shifts/${s.id}`} className="hover:underline">
-                    {fmtDateLong(s.sheet_date)}
-                  </Link>
-                  {!s.pay_period_id && (
-                    <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">
-                      no pay period
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge status={s.status} />
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums">{summary.shift_count}</td>
-                <td className="px-4 py-3 text-right tabular-nums">{summary.total_hours.toFixed(2)}</td>
-                <td className="px-4 py-3 text-right tabular-nums">${summary.total_pay.toFixed(2)}</td>
-                <td className="px-4 py-3 text-right">
-                  <Link href={`/shifts/${s.id}`} className="text-xs text-zinc-500 hover:underline">
-                    Open
-                  </Link>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function StatusBadge({ status }: { status: DailySheet['status'] }) {
-  const cls =
-    status === 'approved'
-      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
-      : status === 'reviewing'
-      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
-      : 'bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${cls}`}>{status}</span>
 }
 
 function fmtDateLong(iso: string) {
   return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
-    weekday: 'short',
-    month: 'short',
+    weekday: 'long',
+    month: 'long',
     day: 'numeric',
-    year: 'numeric',
   })
 }

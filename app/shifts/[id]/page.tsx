@@ -1,12 +1,12 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
-import { getScanSignedUrl } from '@/lib/storage'
 import { summarizeDay } from '@/lib/payroll'
 import { addShift, setDailySheetStatus, deleteDailySheet } from '../actions'
 import { ShiftRows } from './ShiftRows'
 import { AddShiftForm } from './AddShiftForm'
 import { AlcoholSection } from './AlcoholSection'
+import { ScanPhotoPanel } from './ScanPhotoPanel'
 import type { DailySheet, Shift, Employee, PayPeriod, AlcoholSale } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -22,11 +22,13 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
     { data: alcoholRow },
   ] = await Promise.all([
     supabase.from('daily_sheets').select('*').eq('id', id).maybeSingle(),
+    // Fetch unordered. We sort below in JS using display_order (when present)
+    // → start_time → created_at, which keeps the query working whether or not
+    // migration 0002_shift_display_order.sql has been applied.
     supabase
       .from('shifts')
       .select('*')
-      .eq('daily_sheet_id', id)
-      .order('start_time', { ascending: true, nullsFirst: false }),
+      .eq('daily_sheet_id', id),
     supabase
       .from('employees')
       .select('*')
@@ -42,9 +44,21 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
   if (!sheetRow) notFound()
 
   const sheet = sheetRow as DailySheet
-  const shifts = (shiftsRow ?? []) as Shift[]
   const employees = (employeesRow ?? []) as Employee[]
   const alcoholSales = (alcoholRow ?? []) as AlcoholSale[]
+  // Sort shifts client-side: display_order if present (post-migration),
+  // otherwise start_time, otherwise created_at. Stable across both states.
+  const shifts = ((shiftsRow ?? []) as Shift[])
+    .slice()
+    .sort((a, b) => {
+      const aOrd = a.display_order ?? Number.POSITIVE_INFINITY
+      const bOrd = b.display_order ?? Number.POSITIVE_INFINITY
+      if (aOrd !== bOrd) return aOrd - bOrd
+      const at = a.start_time ?? '99:99'
+      const bt = b.start_time ?? '99:99'
+      if (at !== bt) return at.localeCompare(bt)
+      return (a.created_at ?? '').localeCompare(b.created_at ?? '')
+    })
 
   // Resolve enclosing pay period if any (for the header link).
   let period: PayPeriod | null = null
@@ -58,23 +72,23 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
   }
 
   const summary = summarizeDay(shifts)
-  const scanImageUrl = await getScanSignedUrl(sheet.scan_image_path)
+  const hasScanImage = Boolean(sheet.scan_image_path)
 
   return (
     <div className="mx-auto max-w-6xl">
       <header className="pb-6">
-        <Link href="/shifts" className="text-sm text-zinc-500 hover:underline">
+        <Link href="/shifts" className="text-sm text-[color:var(--muted)] hover:text-[color:var(--foreground)]">
           ← Daily shifts
         </Link>
         <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{fmtDateLong(sheet.sheet_date)}</h1>
-            <p className="mt-1 text-sm text-zinc-500">
-              Status: <span className="font-medium">{sheet.status}</span>
+            <h1 className="text-3xl font-semibold tracking-tight">{fmtDateLong(sheet.sheet_date)}</h1>
+            <p className="mt-1 text-sm text-[color:var(--muted)]">
+              <span className="font-medium text-[color:var(--foreground)]">{sheet.status}</span>
               {period ? (
                 <>
                   {' · '}
-                  <Link href={`/payroll/${period.id}`} className="hover:underline">
+                  <Link href={`/payroll/${period.id}`} className="link-soft">
                     Pay period {fmtShort(period.start_date)} → {fmtShort(period.end_date)}
                   </Link>
                 </>
@@ -94,35 +108,23 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
 
       <SummaryCards summary={summary} />
 
-      {scanImageUrl && (
+      {hasScanImage && (
         <section className="mt-6">
-          <details className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <summary className="cursor-pointer text-sm font-medium text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100">
-              Original sheet photo
-            </summary>
-            <div className="mt-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={scanImageUrl}
-                alt="Scanned daily sign-in/out sheet"
-                className="max-h-[80vh] w-full rounded border border-zinc-200 object-contain dark:border-zinc-800"
-              />
-            </div>
-          </details>
+          <ScanPhotoPanel sheetId={sheet.id} />
         </section>
       )}
 
       <section className="mt-8">
-        <h2 className="mb-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">Add a shift</h2>
+        <h2 className="mb-3 text-sm text-[color:var(--muted)]">Add a shift</h2>
         <AddShiftForm dailySheetId={sheet.id} employees={employees} addShift={addShift} />
       </section>
 
       <section className="mt-8">
-        <h2 className="mb-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <h2 className="mb-3 text-sm text-[color:var(--muted)]">
           Shifts ({shifts.length})
         </h2>
         {shifts.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-zinc-300 bg-white p-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900">
+          <p className="surface border-dashed p-6 text-center text-sm text-[color:var(--muted)]">
             No shifts yet. Add one above.
           </p>
         ) : (
@@ -193,7 +195,15 @@ function SummaryCards({
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <Card label="Total hours" value={summary.total_hours.toFixed(2)} />
-      <Card label="Total pay" value={`$${summary.total_pay.toFixed(2)}`} />
+      <Card
+        label="Net pay"
+        value={`$${summary.total_pay.toFixed(2)}`}
+        subtitle={
+          summary.total_meal_deduction > 0
+            ? `gross $${summary.total_gross_pay.toFixed(2)} − meals $${summary.total_meal_deduction.toFixed(2)}`
+            : undefined
+        }
+      />
       <Card label="Employees" value={summary.rows.length.toString()} />
       <Card
         label="Flagged for review"
@@ -208,16 +218,21 @@ function Card({
   label,
   value,
   tone = 'default',
+  subtitle,
 }: {
   label: string
   value: string
   tone?: 'default' | 'warn'
+  subtitle?: string
 }) {
   const accent = tone === 'warn' ? 'text-amber-700 dark:text-amber-300' : ''
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <p className="text-xs uppercase tracking-wide text-zinc-500">{label}</p>
-      <p className={`mt-1 text-xl font-semibold tabular-nums ${accent}`}>{value}</p>
+    <div className="surface p-4">
+      <p className="text-xs text-[color:var(--muted)]">{label}</p>
+      <p className={`mt-1 text-2xl font-semibold tabular-nums ${accent}`}>{value}</p>
+      {subtitle && (
+        <p className="mt-1 text-[11px] text-[color:var(--muted)]">{subtitle}</p>
+      )}
     </div>
   )
 }

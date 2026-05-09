@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { normalizeEmployeeName } from '@/lib/normalize'
 
 const ImportRow = z.object({
   full_name: z.string().trim().min(1).max(120),
@@ -24,13 +25,17 @@ export type BulkImportResult = {
 export async function bulkImportEmployees(rows: BulkImportInput): Promise<BulkImportResult> {
   const supabase = getSupabaseAdmin()
 
-  // Pull active employees once for case-insensitive duplicate check.
+  // Pull every employee (active and inactive) for normalized duplicate check.
+  // We never want a re-import to create a second "Hassan" row even if the
+  // prior Hassan was deactivated, and we want spelling variants like
+  // "Lisa F" / "Lisa F." / "lisa  f" to all collapse together.
   const { data: existing, error: fetchErr } = await supabase
     .from('employees')
     .select('full_name')
-    .eq('active', true)
   if (fetchErr) throw new Error(fetchErr.message)
-  const existingLower = new Set((existing ?? []).map((e) => e.full_name.toLowerCase()))
+  const existingKeys = new Set(
+    (existing ?? []).map((e) => normalizeEmployeeName(e.full_name))
+  )
 
   const result: BulkImportResult = { inserted: 0, skippedDuplicates: [], errors: [] }
   const toInsert: Record<string, unknown>[] = []
@@ -43,11 +48,12 @@ export async function bulkImportEmployees(rows: BulkImportInput): Promise<BulkIm
       result.errors.push({ name: String(raw.full_name ?? '?'), message: e instanceof Error ? e.message : 'Invalid row' })
       continue
     }
-    if (existingLower.has(parsed.full_name.toLowerCase())) {
+    const key = normalizeEmployeeName(parsed.full_name)
+    if (!key || existingKeys.has(key)) {
       result.skippedDuplicates.push(parsed.full_name)
       continue
     }
-    existingLower.add(parsed.full_name.toLowerCase())
+    existingKeys.add(key)
     toInsert.push({
       full_name: parsed.full_name,
       role: parsed.role || null,
