@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { LogoutButton } from './LogoutButton'
 
 const NAV: { href: string; label: string }[] = [
   { href: '/', label: 'Dashboard' },
@@ -16,6 +17,7 @@ const NAV: { href: string; label: string }[] = [
 export function MobileNav() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
+  const hidden = pathname?.startsWith('/login') ?? false
 
   // Close the drawer whenever the route changes.
   useEffect(() => {
@@ -31,6 +33,8 @@ export function MobileNav() {
       document.body.style.overflow = prev
     }
   }, [open])
+
+  if (hidden) return null
 
   return (
     <>
@@ -93,6 +97,9 @@ export function MobileNav() {
                 </Link>
               )
             })}
+            <div className="mt-auto pt-4">
+              <LogoutButton className="w-full rounded-md border-l-2 border-transparent px-3 py-2 text-left text-sm text-[color:var(--muted)] transition hover:bg-black/5 hover:text-[color:var(--foreground)] dark:hover:bg-white/5" />
+            </div>
           </nav>
         </>
       )}

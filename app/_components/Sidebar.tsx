@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { LogoutButton } from './LogoutButton'
 
 const NAV: { href: string; label: string }[] = [
   { href: '/', label: 'Dashboard' },
@@ -14,8 +15,9 @@ const NAV: { href: string; label: string }[] = [
 
 export function Sidebar() {
   const pathname = usePathname()
+  if (pathname?.startsWith('/login')) return null
   return (
-    <aside className="hidden w-56 shrink-0 border-r border-[color:var(--border)] px-3 py-6 md:block">
+    <aside className="hidden w-56 shrink-0 flex-col border-r border-[color:var(--border)] px-3 py-6 md:flex">
       <Link
         href="/"
         className="mb-6 flex items-center gap-2 px-2 text-base font-semibold tracking-tight text-[color:var(--foreground)]"
@@ -43,6 +45,9 @@ export function Sidebar() {
           )
         })}
       </nav>
+      <div className="mt-auto pt-6">
+        <LogoutButton />
+      </div>
     </aside>
   )
 }
