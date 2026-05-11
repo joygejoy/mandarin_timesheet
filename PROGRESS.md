@@ -281,51 +281,82 @@ Restrained-MD3 design system
       (Fraunces); the user explicitly preferred plain Geist. Display
       typography removed. Character now lives in layout, color, and motion.
 
+### Done this session (2026-05-11)
+
+Deploy
+- [x] **Production deploy to Vercel** — Supabase prod project created,
+      `0001_init.sql` migration applied, 4 env vars wired
+      (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+      `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`), `vercel --prod`
+      built and shipped. Site live on the Vercel domain.
+
+Master-login auth gate (`6762dbc`)
+- [x] **Next.js 16 `proxy.ts`** at project root — note: Next 16 renamed
+      the `middleware` file convention to `proxy` (function name and file).
+      The proxy redirects every unauthenticated request to `/login`;
+      static assets (`_next/static`, `_next/image`, common image
+      extensions, favicon) are skipped via the matcher.
+- [x] **`lib/auth.ts`** — jose-signed JWT in an HttpOnly cookie
+      (`mt_session`, 14-day expiry, `secure` in prod, `SameSite=Lax`).
+      Exposes `createSession` / `destroySession` / `getSession` /
+      `decryptSession` plus a constant-time `verifyCredentials` that
+      compares against `APP_USERNAME` / `APP_PASSWORD` env vars.
+- [x] **`/login` page + server action** — `app/login/page.tsx` (centered
+      card with brand mark) + `LoginForm` client component using
+      `useActionState` for inline error rendering + `app/login/actions.ts`
+      server action that validates creds, calls `createSession`, and
+      `redirect('/')`s.
+- [x] **Logout** — `app/_actions/logout.ts` server action calls
+      `destroySession` and redirects to `/login`. `LogoutButton` rendered
+      at the bottom of `Sidebar` (desktop, `mt-auto`) and inside the
+      mobile drawer (`MobileNav`). Both nav components hide themselves
+      on `/login` so the auth page renders chrome-free.
+- [x] **3 new env vars** — `APP_USERNAME`, `APP_PASSWORD`,
+      `SESSION_SECRET` (32-byte base64). Added to local `.env.local`,
+      Vercel Production + Preview + Development, and documented in
+      `.env.local.example`. `jose` added as a dependency.
+
 ### Where you are right now
 
-- **Head of `main`:** `8f293b4` — restrained-MD3 design system + shared
-  PageHero across all pages. Pushed to GitHub. `npm run build` passes
-  clean (12.3s, 18 routes, no TS errors).
+- **Head of `main`:** `6762dbc` — master-login auth gate via Next 16
+  proxy. Pushed to GitHub; Vercel auto-deployed.
+- **Production:** live on Vercel, master-login required at `/login`.
 - **Local dev server:** runs on http://localhost:3000.
-- **Deploy:** intentionally on hold. Repo is fully prod-ready; resume with
-  the checklist below when ready.
 
-### Next: deploy to Vercel (chose CLI flow + new prod Supabase)
+### Deploy checklist (done)
 
-When you come back, work through this in order. Each step is "Browser" or
-"Terminal." Anything marked 🟡 is interactive — you'll need to type values.
+The original 11-step Vercel deploy checklist is complete. For posterity:
 
-1. **(Browser)** Create the production Supabase project at
-   https://supabase.com/dashboard → New Project. Save the DB password.
-2. **(Browser)** SQL Editor → paste `supabase/migrations/0001_init.sql` →
-   Run. Creates the schema.
-3. **(Browser)** Project Settings → API → copy three values:
-   `Project URL`, `anon public`, `service_role secret`.
-4. **(Browser)** Confirm OpenAI billing has at least **$5** in credits at
-   https://platform.openai.com/settings/organization/billing — otherwise
-   scans return `insufficient_quota`.
-5. **(Terminal)** `npm i -g vercel`
-6. **🟡 (Terminal)** `! vercel login` — pick the auth tied to your GitHub.
-7. **🟡 (Terminal)** `! vercel link` — first deploy: not linked to existing,
-   project name `mandarin-timesheet`, directory `./`.
-8. **🟡 (Terminal)** Add env vars one at a time, selecting Production +
-   Preview + Development for all of them:
-   - `! vercel env add NEXT_PUBLIC_SUPABASE_URL`
-   - `! vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `! vercel env add SUPABASE_SERVICE_ROLE_KEY`
-   - `! vercel env add OPENAI_API_KEY`
-9. **🟡 (Terminal)** `! vercel --prod` — first build ~2 min.
-10. **(Browser)** Smoke-test the deploy URL: `/employees` (add a test
-    employee), `/scan` (upload a photo).
-11. **(Browser, strongly recommended)** Vercel dashboard → your project →
-    Settings → **Deployment Protection** → enable for Production. There's
-    no in-app auth yet; without protection anyone with the URL can
-    read/write all data.
+1. ✅ Created prod Supabase project.
+2. ✅ Applied `supabase/migrations/0001_init.sql`.
+3. ✅ Copied `Project URL`, `anon public`, `service_role secret`.
+4. ✅ Confirmed OpenAI billing.
+5. ✅ Vercel CLI already installed (50.20.0).
+6. ✅ `vercel login`.
+7. ✅ `vercel link` → project `mandarin-timesheet`.
+8. ✅ Added the 4 Supabase + OpenAI env vars across all 3 environments.
+9. ✅ `vercel --prod`.
+10. ✅ Smoke-tested.
+11. ⚠️ **Skipped** — Vercel Deployment Protection no longer needed since
+    master-login auth is now wired in-app. If you want a second layer
+    you can still enable it.
 
 **Tier note:** `/api/shifts/extract` declares `maxDuration = 90s`. The
 **Hobby** (free) tier caps at 60s; **Pro** ($20/mo) honors 90s. Most scans
 fit Hobby because the image is downscaled client-side, but very large
 sheets may time out. Start on Hobby.
+
+### Security follow-ups (do soon)
+
+- [ ] **Rotate `APP_PASSWORD`.** The current password was typed into chat
+      transcript, so treat it as compromised. Rotate via:
+      `vercel env rm APP_PASSWORD production` then `vercel env add
+      APP_PASSWORD` with a fresh value across all 3 environments, then
+      redeploy.
+- [ ] (Optional) **Add per-user auth + RLS.** Master-login is a single
+      shared credential; everyone who knows it can read/write everything.
+      For multi-manager safety, swap to Supabase Auth + RLS policies on
+      every table keyed off `auth.uid()` (see "Not yet built").
 
 ### Design follow-ups (not blocking deploy)
 
@@ -344,7 +375,10 @@ sheets may time out. Start on Hobby.
 
 ### Not yet built
 
-- [ ] **Auth + RLS policies** so multiple managers can share the app safely.
+- [ ] **Per-user auth + RLS.** Master-login (single shared credential) is
+      now in place; the long-term goal is Supabase auth with magic links
+      + row-level policies on every table keyed off `auth.uid()` so
+      multiple managers can share the app safely.
 - [ ] **Alcohol points in the scan flow** — discussed: per-row columns would
       be confusing for multi-shift servers; better path is a separate
       "Alcohol points" panel below the shifts table on the scan review
