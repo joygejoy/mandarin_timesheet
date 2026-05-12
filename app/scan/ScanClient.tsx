@@ -64,6 +64,14 @@ type ApiResponse = {
   error?: string
 }
 
+const SCAN_MESSAGES = [
+  'Reading handwriting…',
+  'Matching employees…',
+  'Parsing bracket notation…',
+  'Calculating shift hours…',
+  'Almost done…',
+]
+
 export function ScanClient({ employees }: { employees: Employee[] }) {
   const router = useRouter()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -282,14 +290,32 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
 
   if (step === 'done' && savedSheetId) {
     return (
-      <div className="space-y-4">
-        <div className="surface border-l-2 border-l-emerald-500 p-4 text-sm">
-          <p className="font-medium">Saved {candidates.filter((c) => c.include).length} shifts.</p>
-          <p className="mt-1 text-[color:var(--muted)]">
-            The sheet is in <span className="text-[color:var(--foreground)]">review</span> status. Open it to fix anything else and approve into payroll.
+      <div className="flex flex-col items-center gap-6 py-16 text-center animate-[fade-in-up_0.4s_ease_both]">
+        <div className="animate-[success-pop_0.5s_cubic-bezier(0.34,1.56,0.64,1)_both]">
+          <div
+            className="flex h-20 w-20 items-center justify-center rounded-full"
+            style={{ backgroundColor: 'var(--success-tint)' }}
+          >
+            <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden>
+              <path
+                d="M10 21 L16.5 27.5 L30 13"
+                stroke="var(--tertiary)"
+                strokeWidth="2.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+        </div>
+        <div>
+          <p className="text-xl font-semibold">Sheet saved!</p>
+          <p className="mt-1 text-sm text-[color:var(--muted)]">
+            {candidates.filter((c) => c.include).length} shifts ·{' '}
+            sheet is in{' '}
+            <strong className="text-[color:var(--foreground)]">review</strong> status
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap justify-center gap-3">
           <Link href={`/shifts/${savedSheetId}`} className="btn-primary">
             Open the new sheet
           </Link>
@@ -305,13 +331,12 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
 
   if (step === 'pick' || step === 'extracting') {
     return (
-      <div className="space-y-4">
-        <UploadCard
-          fileInputRef={fileInput}
-          step={step}
-          previewUrl={previewUrl}
-          onFileChosen={onFileChosen}
-        />
+      <div className="mx-auto max-w-lg space-y-4">
+        {step === 'pick' ? (
+          <DropZone fileInputRef={fileInput} onFileChosen={onFileChosen} />
+        ) : (
+          <ExtractingView previewUrl={previewUrl} />
+        )}
         {error && (
           <div className="rounded-md border border-rose-200 bg-rose-50/60 p-3 text-sm text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
             {error}
@@ -365,12 +390,30 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
                 <span className="inline-flex items-center gap-1.5">
                   <span className="inline-block h-2 w-2 rounded-sm bg-rose-400" /> empty — fill in
                 </span>
-                <span className="ml-1">— fix the highlighted cells, then click the blue <strong>Confirm</strong> button on each row.</span>
+                <span className="ml-1">
+                  — fix the highlighted cells, then click the blue{' '}
+                  <strong>Confirm</strong> button on each row.
+                </span>
               </p>
             </div>
           )}
 
-          <div className="surface overflow-x-auto">
+          {/* Mobile: stacked shift cards */}
+          <div className="space-y-3 md:hidden">
+            {candidates.map((c, i) => (
+              <ShiftCard
+                key={c.id}
+                c={c}
+                index={i}
+                employees={employees}
+                onPatch={(p) => patchCandidate(c.id, p)}
+                onEmployeeChange={(picked) => onEmployeeChange(c.id, picked)}
+              />
+            ))}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="surface hidden overflow-x-auto md:block">
             <table className="min-w-full text-sm">
               <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
                 <tr>
@@ -427,58 +470,284 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   )
 }
 
-function UploadCard({
+// ---- DropZone ---------------------------------------------------------------
+
+function DropZone({
   fileInputRef,
-  step,
-  previewUrl,
   onFileChosen,
 }: {
   fileInputRef: React.RefObject<HTMLInputElement | null>
-  step: string
-  previewUrl: string | null
   onFileChosen: (file: File) => void
 }) {
+  const [dragOver, setDragOver] = useState(false)
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (file && file.type.startsWith('image/')) onFileChosen(file)
+  }
+
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="surface p-4">
-        <label className="block text-xs text-[color:var(--muted)]">
-          Sheet image
-        </label>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          disabled={step === 'extracting'}
-          className="mt-2 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[color:var(--foreground)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[color:var(--background)] hover:file:opacity-85"
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) onFileChosen(f)
-          }}
-        />
-        <p className="mt-3 text-xs text-[color:var(--muted)]">
-          On mobile this opens your camera. JPG/PNG/HEIC up to 10 MB. Takes 10–30 seconds.
-        </p>
-        {step === 'extracting' && (
-          <p className="mt-3 inline-flex items-center gap-2 text-sm text-[color:var(--muted)]">
-            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[color:var(--accent)]" />
-            Reading the sheet… GPT-4o is parsing handwriting and bracket notation.
-          </p>
-        )}
+    <div
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+      onClick={() => fileInputRef.current?.click()}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click()
+      }}
+      aria-label="Tap to photograph or drag and drop a sheet image"
+      className={
+        'surface flex min-h-64 cursor-pointer select-none flex-col items-center justify-center gap-5 p-10 text-center transition-[border-color,background-color] duration-200 ' +
+        (dragOver
+          ? 'border-[color:var(--primary)] bg-[color:var(--accent-tint)]'
+          : 'border-dashed hover:border-[color:var(--border-strong)] hover:bg-black/[0.015] dark:hover:bg-white/[0.015]')
+      }
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) onFileChosen(f)
+        }}
+      />
+
+      {/* Camera icon */}
+      <div
+        className="flex h-16 w-16 items-center justify-center rounded-2xl transition-transform duration-200"
+        style={{ backgroundColor: 'var(--accent-tint)' }}
+      >
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden>
+          <circle cx="16" cy="17" r="5" stroke="var(--primary)" strokeWidth="2" />
+          <path
+            d="M4 12.5C4 10.567 5.567 9 7.5 9H10l1.5-2.5A1 1 0 0 1 12.5 6h7a1 1 0 0 1 .866.5L22 9h2.5C26.433 9 28 10.567 28 12.5V23c0 1.933-1.567 3.5-3.5 3.5h-17C5.567 26.5 4 24.933 4 23V12.5Z"
+            stroke="var(--primary)"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+        </svg>
       </div>
-      <div className="surface p-2">
-        {previewUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={previewUrl} alt="Sheet preview" className="max-h-80 w-full rounded object-contain" />
-        ) : (
-          <div className="flex h-full min-h-40 items-center justify-center text-xs text-[color:var(--muted)]">
-            Preview appears here
-          </div>
-        )}
+
+      <div className="space-y-1.5">
+        <p className="text-base font-semibold text-[color:var(--foreground)]">
+          {dragOver ? 'Drop to scan' : 'Add a sheet photo'}
+        </p>
+        <p className="text-sm text-[color:var(--muted)]">
+          Tap to open your camera, or drag an image here
+        </p>
+        <p className="text-xs text-[color:var(--muted)]">
+          JPG · PNG · HEIC · up to 10 MB · takes 10–30 s
+        </p>
       </div>
     </div>
   )
 }
+
+// ---- ExtractingView ---------------------------------------------------------
+
+function ExtractingView({ previewUrl }: { previewUrl: string | null }) {
+  const [msgIdx, setMsgIdx] = useState(0)
+
+  useEffect(() => {
+    const id = setInterval(() => setMsgIdx((i) => (i + 1) % SCAN_MESSAGES.length), 2400)
+    return () => clearInterval(id)
+  }, [])
+
+  return (
+    <div className="surface overflow-hidden">
+      {previewUrl ? (
+        <div className="relative">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewUrl}
+            alt="Sheet being scanned"
+            className="max-h-96 w-full object-contain"
+          />
+          {/* Animated scan line sweeping top → bottom */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute left-0 right-0 h-[3px] animate-[scan-sweep_2s_ease-in-out_infinite_alternate] rounded-full"
+            style={{
+              background: 'linear-gradient(to right, var(--primary), var(--accent), var(--tertiary))',
+            }}
+          />
+          {/* Status overlay */}
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-10">
+            <p className="flex items-center gap-2.5 text-sm font-medium text-white">
+              <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-[color:var(--accent)]" />
+              {SCAN_MESSAGES[msgIdx]}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-center p-16">
+          <p className="flex items-center gap-2.5 text-sm text-[color:var(--muted)]">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[color:var(--accent)]" />
+            {SCAN_MESSAGES[msgIdx]}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- ShiftCard (mobile stacked layout) --------------------------------------
+
+function ShiftCard({
+  c,
+  index,
+  employees,
+  onPatch,
+  onEmployeeChange,
+}: {
+  c: Candidate
+  index: number
+  employees: Employee[]
+  onPatch: (p: Partial<Candidate>) => void
+  onEmployeeChange: (picked: { id: string | null; label: string }) => void
+}) {
+  const flagged = c.needs_review
+  const lowConf = c.confidence < 0.8
+  const startMissing = !c.start_time
+  const endMissing = !c.end_time
+  const startSuspect =
+    flagged && (lowConf || c.inferred_from_bracket) && c.start_time === c.predicted_start_time && !startMissing
+  const endSuspect =
+    flagged && (lowConf || c.inferred_from_bracket) && c.end_time === c.predicted_end_time && !endMissing
+
+  return (
+    <div
+      style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
+      className={
+        'surface space-y-3 p-4 animate-[fade-in-up_0.3s_ease_both] ' +
+        (!c.include ? 'opacity-50' : '')
+      }
+    >
+      {/* Checkbox + employee */}
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={c.include}
+          onChange={(e) => onPatch({ include: e.target.checked })}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[color:var(--primary)]"
+        />
+        <div className="min-w-0 flex-1">
+          <EmployeeCombobox
+            options={employees.map((e) => ({
+              id: e.id,
+              label: e.full_name,
+              sublabel: e.role ?? undefined,
+            }))}
+            value={c.employee_id}
+            customLabel={c.employee_name}
+            onChange={onEmployeeChange}
+          />
+          {flagged && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onPatch({ needs_review: false })}
+                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                title="Mark this row as confirmed and clear the cell highlights"
+              >
+                ✓ Confirm
+              </button>
+              <span className="text-[10px] text-[color:var(--muted)]">
+                {summarizeReviewReason({ lowConf, c, startMissing, endMissing, startSuspect, endSuspect, sectionSuspect: false })}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Start / End */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <p className="mb-1 text-xs text-[color:var(--muted)]">Start</p>
+          <CellShell tone={startMissing ? 'missing' : startSuspect ? 'review' : null}>
+            <TimeInput value={c.start_time} onChange={(v) => onPatch({ start_time: v })} />
+            {startMissing && c.include && <ReviewHint label="missing — fill in" />}
+            {startSuspect && (
+              <ReviewHint
+                label="check time"
+                modelSaid={c.predicted_start_time ? formatTime12(c.predicted_start_time) : null}
+              />
+            )}
+          </CellShell>
+        </div>
+        <div>
+          <p className="mb-1 text-xs text-[color:var(--muted)]">End</p>
+          <CellShell tone={endMissing ? 'missing' : endSuspect ? 'review' : null}>
+            <TimeInput value={c.end_time} onChange={(v) => onPatch({ end_time: v })} />
+            {endMissing && c.include && <ReviewHint label="missing — fill in" />}
+            {endSuspect && (
+              <ReviewHint
+                label="check time"
+                modelSaid={c.predicted_end_time ? formatTime12(c.predicted_end_time) : null}
+              />
+            )}
+          </CellShell>
+        </div>
+      </div>
+
+      {/* Break / Meal / Rate */}
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <p className="mb-1 text-xs text-[color:var(--muted)]">Break (min)</p>
+          <input
+            type="number"
+            min="0"
+            className="input w-full text-right"
+            value={c.break_minutes}
+            onChange={(e) => onPatch({ break_minutes: Number(e.target.value) })}
+          />
+        </div>
+        <div className="flex flex-col items-center justify-end gap-1 pb-2">
+          <p className="text-xs text-[color:var(--muted)]">Meal</p>
+          <input
+            type="checkbox"
+            checked={c.meal_provided}
+            onChange={(e) => onPatch({ meal_provided: e.target.checked })}
+            className="h-5 w-5 accent-[color:var(--primary)]"
+          />
+        </div>
+        <div>
+          <p className="mb-1 text-xs text-[color:var(--muted)]">Rate ($/h)</p>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="input w-full text-right"
+            value={c.hourly_rate}
+            onChange={(e) => onPatch({ hourly_rate: Number(e.target.value) })}
+          />
+        </div>
+      </div>
+
+      {/* Notes — always visible in the card layout */}
+      <div>
+        <p className="mb-1 text-xs text-[color:var(--muted)]">Notes</p>
+        <input
+          type="text"
+          className="input"
+          value={c.notes}
+          maxLength={500}
+          placeholder="Add notes…"
+          onChange={(e) => onPatch({ notes: e.target.value })}
+        />
+      </div>
+    </div>
+  )
+}
+
+// ---- SheetHeader ------------------------------------------------------------
 
 function SheetHeader({
   sheetDate,
@@ -519,6 +788,8 @@ function SheetHeader({
   )
 }
 
+// ---- MetaBox ----------------------------------------------------------------
+
 function MetaBox({ meta }: { meta: SheetMeta }) {
   return (
     <div className="mt-3 rounded-md border border-[color:var(--border)] bg-[color:var(--background)] p-3 text-xs text-[color:var(--muted)]">
@@ -532,6 +803,8 @@ function MetaBox({ meta }: { meta: SheetMeta }) {
     </div>
   )
 }
+
+// ---- Row (desktop table row) ------------------------------------------------
 
 function Row({
   c,

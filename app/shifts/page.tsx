@@ -39,6 +39,7 @@ export default async function ShiftsPage() {
       sheet_date: s.sheet_date,
       status: s.status,
       pay_period_id: s.pay_period_id,
+      scan_image_path: s.scan_image_path,
       shift_count: sum.shift_count,
       total_hours: sum.total_hours,
       total_pay: sum.total_pay,

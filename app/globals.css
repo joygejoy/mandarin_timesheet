@@ -267,3 +267,22 @@ body {
          focus-visible:ring-[color:var(--primary)] focus-visible:ring-offset-2
          focus-visible:ring-offset-[color:var(--background)];
 }
+
+/* ---- Scan page animations ---- */
+
+@keyframes scan-sweep {
+  from { top: 0; }
+  to   { top: calc(100% - 3px); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes success-pop {
+  0%   { opacity: 0; transform: scale(0.4); }
+  60%  { transform: scale(1.15); }
+  80%  { transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1); }
+}

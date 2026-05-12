@@ -6,6 +6,7 @@ import { addShift, setDailySheetStatus, deleteDailySheet } from '../actions'
 import { ShiftRows } from './ShiftRows'
 import { AddShiftForm } from './AddShiftForm'
 import { AlcoholSection } from './AlcoholSection'
+import { ScanPhotoPanel } from './ScanPhotoPanel'
 import type { DailySheet, Shift, Employee, PayPeriod, AlcoholSale } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -105,6 +106,12 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
       </header>
 
       <SummaryCards summary={summary} />
+
+      {sheet.scan_image_path && (
+        <section className="mt-6">
+          <ScanPhotoPanel sheetId={sheet.id} />
+        </section>
+      )}
 
       <section className="mt-8">
         <h2 className="mb-3 text-sm text-[color:var(--muted)]">Add a shift</h2>

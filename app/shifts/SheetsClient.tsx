@@ -9,6 +9,7 @@ export type SheetRow = {
   sheet_date: string
   status: DailySheet['status']
   pay_period_id: string | null
+  scan_image_path: string | null
   shift_count: number
   total_hours: number
   total_pay: number
@@ -142,6 +143,15 @@ function SheetTable({ rows }: { rows: SheetRow[] }) {
                 <Link href={`/shifts/${s.id}`} className="link-soft">
                   {fmtDateLong(s.sheet_date)}
                 </Link>
+                {s.scan_image_path && (
+                  <span
+                    className="ml-2 inline-flex items-center gap-1 text-[11px] text-[color:var(--muted)]"
+                    title="Created from a scanned sheet — open to view original photo"
+                  >
+                    <CameraIcon />
+                    scan
+                  </span>
+                )}
                 {!s.pay_period_id && (
                   <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">
                     no pay period
@@ -189,4 +199,18 @@ function fmtDateLong(iso: string) {
     day: 'numeric',
     year: 'numeric',
   })
+}
+
+function CameraIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
+      <circle cx="6" cy="7" r="2" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M1 4.5C1 3.67 1.67 3 2.5 3h1L4.25 2a.5.5 0 0 1 .4-.2h2.7a.5.5 0 0 1 .4.2L8.5 3h1C10.33 3 11 3.67 11 4.5V9c0 .83-.67 1.5-1.5 1.5h-7C1.67 10.5 1 9.83 1 9V4.5Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }

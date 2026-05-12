@@ -281,6 +281,76 @@ Restrained-MD3 design system
       (Fraunces); the user explicitly preferred plain Geist. Display
       typography removed. Character now lives in layout, color, and motion.
 
+### Done this session (2026-05-11) — UI/UX refresh + scan traceability
+
+Dashboard & navigation
+- [x] **Simplified dashboard** — removed "Mandarin overview" label and the manual
+      "Enter shifts" card. Dashboard now shows payroll metrics first (total hours,
+      net pay, days not filled, days until payroll) as four `MetricCard` components
+      with alternating pink/green accent rails. Never blank — cards render `—`
+      when no pay period is open. Single `Quick Add Sheet →` CTA below the calendar.
+- [x] **Pay period calendar on dashboard** — `PeriodCalendar` shows every day in
+      the current period as clickable tiles (green dot = approved, pink dot = draft,
+      hollow = no sheet). Today's date is highlighted in primary pink.
+- [x] **"Show Current Period →" / "Create Period →"** — header action button
+      switches label based on whether an open pay period exists.
+- [x] **Unified top-nav** — replaced separate `Sidebar` (desktop) and `MobileNav`
+      (mobile) with a single `app/_components/TopNav.tsx`. Hamburger-only on
+      all screen sizes. Soft Mandarin pink `#f17fb2` background. Side drawer
+      slides in from the right with five links (Scan Timesheet, Daily Shifts,
+      Alcohol Sales, Payroll, Employees) — active links alternate pink (even) /
+      green (odd) with underline. Sign-out at drawer bottom. Body scroll locked
+      while open; auto-closes on route change; hidden on `/login`.
+- [x] **Full-screen gradient** — moved from per-page `blur-shape` elements to
+      `background-attachment: fixed` radial gradients on `<body>`. Pink ellipse
+      anchored top-right, green ellipse bottom-left. Covers the entire viewport
+      on every page regardless of scroll depth; no more abrupt white rectangle
+      on longer pages.
+- [x] **`PageHero` cleanup** — `Atmosphere` blur-shape component removed.
+      Global body gradient makes per-page atmosphere shapes redundant.
+
+Scan Daily Sheet (`/scan`)
+- [x] **`DropZone` component** replaces the basic file input. Large tappable
+      card (`min-h-64`) with camera SVG icon, dashed border, and drag-over
+      highlight (pink border + accent tint fill). `capture="environment"` opens
+      the camera directly on mobile. Keyboard accessible (`Enter`/`Space`).
+- [x] **Animated extraction view** — when OCR is running, shows the uploaded
+      image with a `scan-sweep` keyframe gradient line (pink → accent → green)
+      sweeping top-to-bottom in alternating direction. A pulsing dot and cycling
+      status messages ("Reading handwriting…", "Matching employees…",
+      "Parsing bracket notation…", "Calculating shift hours…") overlay the
+      image bottom. Status cycles every 2.4 s.
+- [x] **Mobile-first review layout** — `md:hidden` section renders a stacked
+      `ShiftCard` per candidate: checkbox + employee combobox at top, start/end
+      time inputs in a 2-col grid, break/meal/rate in a 3-col grid, always-
+      visible notes input. Confirm button and review hints preserved exactly.
+      Cards fade in with staggered `fade-in-up` animation (45 ms × index, max
+      8 steps). Desktop table unchanged (`hidden md:block`).
+- [x] **Animated done state** — success view centered on the page with a
+      `success-pop` spring-bounce checkmark in a green-tinted circle, shift
+      count, and "Open the new sheet" / "Scan another" buttons.
+- [x] **CSS keyframes** added to `globals.css`: `scan-sweep`, `fade-in-up`,
+      `success-pop`. All three respect `prefers-reduced-motion` via the global
+      `0.01ms` override already in place.
+
+Scan traceability
+- [x] **Daily shifts list — scan badge** — `SheetRow` type gains
+      `scan_image_path`; server pre-computes and passes it. Rows with a scan
+      show a small camera SVG + "scan" label next to the date (tooltip:
+      "Created from a scanned sheet — open to view original photo").
+- [x] **Daily sheet detail — original photo panel** — `ScanPhotoPanel`
+      (already built but never rendered) is now shown below the summary cards
+      whenever `sheet.scan_image_path` is set. Collapsible `<details>` element;
+      signed URL lazy-loaded on first open.
+- [x] **Payroll calendar — scan indicator** — calendar day tiles show a tiny
+      "scan" label beneath the status dot when that daily sheet has a
+      `scan_image_path`.
+- [x] **Alcohol page — "Points by day" table** — new `DailyBreakdown`
+      component renders below the full ranking. Shows each date with total
+      points that day in green, plus a "View sheet →" ghost button that links
+      directly to the originating daily sheet. Foot row shows period total.
+      Only renders when at least one day has points.
+
 ### Done this session (2026-05-11)
 
 Deploy

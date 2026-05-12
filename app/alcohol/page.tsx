@@ -40,6 +40,8 @@ export default async function AlcoholPage({
     periodList.find((p) => p.id === periodParam) ?? periodList[0] ?? null
 
   let summary: ReturnType<typeof summarizePayPeriod> | null = null
+  let dailyPoints: { date: string; sheet_id: string; total_points: number }[] = []
+
   if (activePeriod) {
     const { data: sheets } = await supabase
       .from('daily_sheets')
@@ -55,6 +57,14 @@ export default async function AlcoholPage({
         alcohol_sales: s.alcohol_sales,
       }))
     )
+
+    dailyPoints = arr
+      .map((s) => ({
+        date: s.sheet_date,
+        sheet_id: s.id,
+        total_points: s.alcohol_sales.reduce((sum, a) => sum + (a.drink_points ?? 0), 0),
+      }))
+      .filter((d) => d.total_points > 0)
   }
 
   const ranked = summary
@@ -95,6 +105,7 @@ export default async function AlcoholPage({
             <>
               <Podium ranked={ranked.slice(0, 3)} />
               <Table ranked={ranked} dates={summary.dates} totalPoints={summary.total_alcohol_points} />
+              <DailyBreakdown rows={dailyPoints} />
             </>
           )}
         </>
@@ -255,6 +266,62 @@ function NoPeriods() {
       </Link>
     </div>
   )
+}
+
+function DailyBreakdown({
+  rows,
+}: {
+  rows: { date: string; sheet_id: string; total_points: number }[]
+}) {
+  if (rows.length === 0) return null
+  return (
+    <section className="mt-8">
+      <h2 className="eyebrow-green mb-3">Points by day</h2>
+      <div className="surface overflow-hidden">
+        <table className="min-w-full text-sm">
+          <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
+            <tr>
+              <th className="px-3 py-2.5 font-normal">Date</th>
+              <th className="px-3 py-2.5 font-normal text-right">Points</th>
+              <th className="px-3 py-2.5 font-normal text-right">Sheet</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[color:var(--border)]">
+            {rows.map((r) => (
+              <tr key={r.date}>
+                <td className="px-3 py-2.5 font-medium">{fmtDateLong(r.date)}</td>
+                <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-[color:var(--tertiary)]">
+                  {r.total_points}
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  <Link href={`/shifts/${r.sheet_id}`} className="btn-ghost text-xs">
+                    View sheet →
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="border-t border-[color:var(--border)]">
+            <tr>
+              <td className="px-3 py-2.5 text-xs text-[color:var(--muted)]">Total</td>
+              <td className="px-3 py-2.5 text-right font-semibold tabular-nums">
+                {rows.reduce((s, r) => s + r.total_points, 0)}
+              </td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function fmtDateLong(iso: string) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 function fmtRange(start: string, end: string) {

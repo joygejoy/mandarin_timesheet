@@ -254,6 +254,15 @@ function Calendar({
               </span>
               <span className="mt-0.5 block text-sm font-medium tabular-nums">{fmtDayMonth(d)}</span>
               <span className={`mt-1.5 inline-block h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
+              {sheet?.scan_image_path && (
+                <span
+                  className="mt-1 block text-[9px] leading-none text-[color:var(--muted)]"
+                  title="Created from a scanned sheet"
+                  aria-label="scanned"
+                >
+                  scan
+                </span>
+              )}
             </span>
           )
           return sheet ? (
