@@ -48,3 +48,17 @@ export async function setPayPeriodStatus(id: string, status: 'open' | 'closed' |
   revalidatePath('/payroll')
   revalidatePath(`/payroll/${id}`)
 }
+
+export async function deletePayPeriod(id: string) {
+  const supabase = getSupabaseAdmin()
+  // Unlink daily sheets so they're not cascade-deleted with the period.
+  const { error: unlinkErr } = await supabase
+    .from('daily_sheets')
+    .update({ pay_period_id: null })
+    .eq('pay_period_id', id)
+  if (unlinkErr) throw new Error(unlinkErr.message)
+  const { error } = await supabase.from('pay_periods').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+  revalidatePath('/payroll')
+  redirect('/payroll')
+}

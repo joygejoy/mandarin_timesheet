@@ -5,6 +5,7 @@ import { summarizePayPeriod, daysInRange } from '@/lib/payroll'
 import { PageHero } from '@/app/_components/PageHero'
 import { ClosePeriodForm } from './ClosePeriodForm'
 import { PushToSheetsButton } from './PushToSheetsButton'
+import { DeletePeriodButton } from './DeletePeriodButton'
 import type { PayPeriod, DailySheet, Shift, AlcoholSale } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -87,6 +88,7 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
             </a>
             <PushToSheetsButton periodId={id} />
             <ClosePeriodForm id={id} status={period.status} />
+            <DeletePeriodButton id={id} />
           </>
         }
       />
