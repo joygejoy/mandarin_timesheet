@@ -16,19 +16,30 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
   const { id } = await params
   const supabase = getSupabaseAdmin()
 
-  const [{ data: periodRow, error: periodErr }, { data: sheetsRow }] = await Promise.all([
-    supabase.from('pay_periods').select('*').eq('id', id).maybeSingle(),
-    supabase
-      .from('daily_sheets')
-      .select('*, shifts (*), alcohol_sales (*)')
-      .eq('pay_period_id', id)
-      .order('sheet_date', { ascending: true }),
-  ])
+  const { data: periodRow, error: periodErr } = await supabase
+    .from('pay_periods')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
   if (periodErr) throw new Error(periodErr.message)
   if (!periodRow) notFound()
 
   const period = periodRow as PayPeriod
+
+  const { data: sheetsRow } = await supabase
+    .from('daily_sheets')
+    .select('*, shifts (*), alcohol_sales (*)')
+    .gte('sheet_date', period.start_date)
+    .lte('sheet_date', period.end_date)
+    .order('sheet_date', { ascending: true })
+
   const sheets = (sheetsRow ?? []) as SheetWithChildren[]
+
+  // Link any sheets in the date range that aren't yet tied to this period.
+  const unlinkIds = sheets.filter((s) => s.pay_period_id !== id).map((s) => s.id)
+  if (unlinkIds.length > 0) {
+    await supabase.from('daily_sheets').update({ pay_period_id: id }).in('id', unlinkIds)
+  }
   const approved = sheets.filter((s) => s.status === 'approved')
   const drafts = sheets.filter((s) => s.status !== 'approved')
 
