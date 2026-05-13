@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import type { DailySheet } from '@/lib/types/db'
 
@@ -123,6 +124,7 @@ function Toolbar({
 }
 
 function SheetTable({ rows }: { rows: SheetRow[] }) {
+  const router = useRouter()
   return (
     <div className="surface overflow-hidden">
       <table className="min-w-full text-sm">
@@ -138,11 +140,13 @@ function SheetTable({ rows }: { rows: SheetRow[] }) {
         </thead>
         <tbody className="divide-y divide-[color:var(--border)]">
           {rows.map((s) => (
-            <tr key={s.id}>
+            <tr
+              key={s.id}
+              className="cursor-pointer transition-colors hover:bg-[color:var(--surface-container)]"
+              onClick={() => router.push(`/shifts/${s.id}`)}
+            >
               <td className="px-3 py-2.5 font-medium">
-                <Link href={`/shifts/${s.id}`} className="link-soft">
-                  {fmtDateLong(s.sheet_date)}
-                </Link>
+                {fmtDateLong(s.sheet_date)}
                 {s.scan_image_path && (
                   <span
                     className="ml-2 inline-flex items-center gap-1 text-[11px] text-[color:var(--muted)]"
@@ -165,9 +169,7 @@ function SheetTable({ rows }: { rows: SheetRow[] }) {
               <td className="px-3 py-2.5 text-right tabular-nums">{s.total_hours.toFixed(2)}</td>
               <td className="px-3 py-2.5 text-right tabular-nums">${s.total_pay.toFixed(2)}</td>
               <td className="px-3 py-2.5 text-right">
-                <Link href={`/shifts/${s.id}`} className="btn-secondary text-xs">
-                  Open →
-                </Link>
+                <span className="btn-ghost text-xs">Open →</span>
               </td>
             </tr>
           ))}

@@ -350,7 +350,7 @@ function CandidateTable({
                     onChange={(e) => onChange(c.id, { default_meal_provided: e.target.checked })}
                   />
                 </td>
-                <td className="px-3 py-2 align-top text-xs text-zinc-500">{c.source_note ?? '—'}</td>
+                <td className="px-3 py-2 align-top text-xs text-[color:var(--muted)]">{c.source_note ?? '—'}</td>
               </tr>
             )
           })}

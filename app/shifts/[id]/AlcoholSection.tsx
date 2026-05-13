@@ -67,7 +67,7 @@ export function AlcoholSection({
       <div className="mb-3 flex items-end justify-between">
         <div>
           <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Alcohol sales</h2>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-[color:var(--muted)]">
             Drink-point tally per server. Set to 0 to remove a row.
           </p>
         </div>
@@ -97,7 +97,7 @@ export function AlcoholSection({
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-3 py-6 text-center text-sm text-zinc-500">
+                <td colSpan={3} className="px-3 py-6 text-center text-sm text-[color:var(--muted)]">
                   No employees on this sheet yet. Add a shift first or add a server below.
                 </td>
               </tr>
@@ -161,7 +161,7 @@ function PointsRow({
       <td className="px-3 py-2">
         <span className="font-medium">{row.employee_name}</span>
         {!row.fromShift && (
-          <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-400">ad-hoc</span>
+          <span className="ml-2 text-[10px] uppercase tracking-wide text-[color:var(--muted)]">ad-hoc</span>
         )}
       </td>
       <td className="px-3 py-2 text-right">
@@ -182,7 +182,7 @@ function PointsRow({
             }
           }}
         />
-        {pending && <p className="mt-1 text-[10px] text-zinc-400">saving…</p>}
+        {pending && <p className="mt-1 text-[10px] text-[color:var(--muted)]">saving…</p>}
         {row.error && <p className="mt-1 text-xs text-rose-600">{row.error}</p>}
       </td>
       <td className="px-3 py-2 text-right" />

@@ -30,14 +30,24 @@ export function ClosePeriodForm({ id, status }: { id: string; status: PayPeriod[
   }
   if (status === 'closed') {
     return (
-      <button
-        type="button"
-        disabled={pending}
-        onClick={() => go('exported')}
-        className="btn-primary"
-      >
-        {pending ? '…' : 'Mark exported'}
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => go('open')}
+          className="btn-secondary"
+        >
+          {pending ? '…' : 'Re-open'}
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => go('exported')}
+          className="btn-primary"
+        >
+          {pending ? '…' : 'Mark exported'}
+        </button>
+      </div>
     )
   }
   return (

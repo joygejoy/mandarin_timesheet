@@ -1,5 +1,5 @@
-import Link from 'next/link'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
+import { PageHero } from '@/app/_components/PageHero'
 import { isOpenAIConfigured } from '@/lib/openai'
 import { SetupRequired } from '@/app/_components/SetupRequired'
 import { ImportClient } from './ImportClient'
@@ -32,16 +32,13 @@ export default async function ImportEmployeesPage() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto max-w-5xl">
-      <header className="pb-8">
-        <Link href="/employees" className="text-sm text-[color:var(--muted)] hover:text-[color:var(--foreground)]">
-          ← Employees
-        </Link>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Import from a sheet</h1>
-        <p className="mt-1 text-sm text-[color:var(--muted)]">
-          Upload a daily sign-in sheet, CSV, or XLSX. Names are extracted and dedupe is
-          case- and punctuation-insensitive — re-importing won't create duplicates.
-        </p>
-      </header>
+      <PageHero
+        eyebrow="Employees · Import"
+        title="Import from a sheet"
+        subtitle="Upload a daily sign-in sheet, CSV, or XLSX. Names are extracted and dedupe is case- and punctuation-insensitive — re-importing won't create duplicates."
+        accent="green"
+        backLink={{ href: '/employees', label: 'Employees' }}
+      />
       {children}
     </div>
   )

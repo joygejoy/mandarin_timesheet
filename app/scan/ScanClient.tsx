@@ -131,7 +131,9 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
       approved_by_signature: sheet.approved_by_signature,
       notes: sheet.notes,
     })
-    setSheetDate(sheet.date_iso ?? new Date().toISOString().slice(0, 10))
+    const d = new Date()
+    const localToday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    setSheetDate(sheet.date_iso ?? localToday)
     setApprovedBy(sheet.approved_by_signature ?? '')
 
     const built = sheet.shifts.map((s, i): Candidate => {
@@ -201,10 +203,10 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
       {
         id: `c${cs.length}-${Date.now()}`,
         include: true,
-        employee_id: employees[0]?.id ?? null,
-        employee_name: employees[0]?.full_name ?? '',
-        hourly_rate: employees[0]?.hourly_rate ?? DEFAULT_WAGE_RATE,
-        role: employees[0]?.role ?? '',
+        employee_id: null,
+        employee_name: '',
+        hourly_rate: DEFAULT_WAGE_RATE,
+        role: '',
         section: '',
         start_time: '',
         end_time: '',
@@ -214,7 +216,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         notes: '',
         confidence: 1,
         inferred_from_bracket: false,
-        needs_review: false,
+        needs_review: true,
         predicted_section: '',
         predicted_start_time: '',
         predicted_end_time: '',
@@ -391,7 +393,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
                   <span className="inline-block h-2 w-2 rounded-sm bg-rose-400" /> empty — fill in
                 </span>
                 <span className="ml-1">
-                  — fix the highlighted cells, then click the blue{' '}
+                  — fix the highlighted cells, then click the green{' '}
                   <strong>Confirm</strong> button on each row.
                 </span>
               </p>
@@ -654,7 +656,7 @@ function ShiftCard({
               <button
                 type="button"
                 onClick={() => onPatch({ needs_review: false })}
-                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                className="btn-tertiary px-3 py-1 text-xs"
                 title="Mark this row as confirmed and clear the cell highlights"
               >
                 ✓ Confirm
@@ -865,7 +867,7 @@ function Row({
             <button
               type="button"
               onClick={() => onPatch({ needs_review: false })}
-              className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              className="btn-tertiary px-3 py-1 text-xs"
               title="Mark this row as confirmed and clear the cell highlights"
             >
               ✓ Confirm
@@ -992,7 +994,7 @@ function NotesCell({
       className={
         'flex h-8 w-8 items-center justify-center rounded-md text-base transition ' +
         (hasNotes
-          ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300'
+          ? 'bg-[color:var(--primary-container)] text-[color:var(--on-primary-container)] hover:bg-[color:var(--primary-container)]/85'
           : 'text-[color:var(--muted)] hover:bg-black/5 dark:hover:bg-white/5')
       }
     >

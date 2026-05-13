@@ -47,6 +47,7 @@ export default async function AlcoholPage({
       .from('daily_sheets')
       .select('*, alcohol_sales (*)')
       .eq('pay_period_id', activePeriod.id)
+      .eq('status', 'approved')
       .order('sheet_date', { ascending: true })
 
     const arr = (sheets ?? []) as SheetWithAlcohol[]
@@ -104,7 +105,7 @@ export default async function AlcoholPage({
           ) : (
             <>
               <Podium ranked={ranked.slice(0, 3)} />
-              <Table ranked={ranked} dates={summary.dates} totalPoints={summary.total_alcohol_points} />
+              <Table ranked={ranked} totalPoints={summary.total_alcohol_points} />
               <DailyBreakdown rows={dailyPoints} />
             </>
           )}
@@ -214,7 +215,6 @@ function Table({
   totalPoints,
 }: {
   ranked: { employee_name: string; alcohol_points: number; by_date: Record<string, { alcohol_points: number }> }[]
-  dates: string[]
   totalPoints: number
 }) {
   return (

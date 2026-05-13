@@ -80,6 +80,15 @@ export async function addShift(formData: FormData) {
     meal_provided: raw.meal_provided ?? false,
   })
   const supabase = getSupabaseAdmin()
+
+  const { data: sheetCheck } = await supabase
+    .from('daily_sheets')
+    .select('status')
+    .eq('id', parsed.daily_sheet_id)
+    .maybeSingle()
+  if (sheetCheck?.status === 'approved') {
+    throw new Error('Cannot add shifts to an approved sheet.')
+  }
   const { error } = await supabase.from('shifts').insert({
     daily_sheet_id: parsed.daily_sheet_id,
     employee_id: parsed.employee_id ?? null,

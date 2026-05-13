@@ -86,7 +86,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
   )
 
   const filename = `payroll_${period.start_date}_${period.end_date}.csv`
-  return new Response(lines.join('\n') + '\n', {
+  return new Response('﻿' + lines.join('\n') + '\n', {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${filename}"`,

@@ -25,7 +25,7 @@ export default async function ShiftsPage() {
     .from('daily_sheets')
     .select('*, shifts (*)')
     .order('sheet_date', { ascending: false })
-    .limit(60)
+    .limit(730)
   if (error) throw new Error(error.message)
   const sheets = (data ?? []) as SheetWithShifts[]
   const today = isoDate(new Date())

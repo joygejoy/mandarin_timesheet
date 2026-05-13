@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { summarizePayPeriod, daysInRange, isoDate } from '@/lib/payroll'
-import { createDailySheet } from './shifts/actions'
 import { GettingStarted } from './_onboarding/GettingStarted'
 import { ShowWalkthroughButton } from './_onboarding/ShowWalkthroughButton'
 import { getOnboardingStatus } from './_onboarding/getOnboardingStatus'
@@ -61,7 +60,7 @@ async function getDashboardData() {
   const approvedDates = new Set(approved.map((s) => s.sheet_date))
   const draftDates = new Set(drafts.map((s) => s.sheet_date))
   const pastDays = allDates.filter((d) => d <= today)
-  const daysNotFilled = pastDays.filter((d) => !approvedDates.has(d)).length
+  const daysNotFilled = pastDays.filter((d) => !approvedDates.has(d) && !draftDates.has(d)).length
 
   const endDate = new Date(period.end_date + 'T00:00:00')
   const todayDate = new Date(today + 'T00:00:00')
@@ -176,12 +175,9 @@ export default async function Home() {
 
       {/* Primary CTA */}
       <div className="mb-10">
-        <form action={createDailySheet}>
-          <input type="hidden" name="sheet_date" value={today} />
-          <button type="submit" className="btn-primary w-full py-3 text-base">
-            Quick Add Sheet →
-          </button>
-        </form>
+        <Link href="/scan" className="btn-primary block w-full py-3 text-center text-base">
+          Quick Add Sheet →
+        </Link>
       </div>
 
       {/* Onboarding walkthrough */}

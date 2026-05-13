@@ -83,7 +83,7 @@ export function AddShiftForm({
     >
       <div className="grid gap-3 sm:grid-cols-6">
         <div className="sm:col-span-2">
-          <label className="block text-xs text-zinc-500">Employee</label>
+          <label className="block text-xs text-[color:var(--muted)]">Employee</label>
           <div className="mt-1">
             <EmployeeCombobox
               options={employees.map((e) => ({
@@ -97,17 +97,17 @@ export function AddShiftForm({
             />
           </div>
           {!employeeId && name && (
-            <p className="mt-1 text-[10px] text-zinc-400">unlinked from roster</p>
+            <p className="mt-1 text-[10px] text-[color:var(--muted)]">unlinked from roster</p>
           )}
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-500">Section</label>
+          <label className="block text-xs text-[color:var(--muted)]">Section</label>
           <input name="section" className="input mt-1" maxLength={20} placeholder="A" />
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-500">Role</label>
+          <label className="block text-xs text-[color:var(--muted)]">Role</label>
           <input
             value={role}
             onChange={(e) => setRole(e.target.value)}
@@ -117,7 +117,7 @@ export function AddShiftForm({
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-500">Start (HH:MM)</label>
+          <label className="block text-xs text-[color:var(--muted)]">Start (HH:MM)</label>
           <input
             name="start_time"
             type="time"
@@ -126,11 +126,11 @@ export function AddShiftForm({
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-500">End (HH:MM)</label>
+          <label className="block text-xs text-[color:var(--muted)]">End (HH:MM)</label>
           <input name="end_time" type="time" className="input mt-1" placeholder="22:00" />
         </div>
         <div>
-          <label className="block text-xs text-zinc-500">Break (min)</label>
+          <label className="block text-xs text-[color:var(--muted)]">Break (min)</label>
           <input
             type="number"
             min="0"
@@ -140,7 +140,7 @@ export function AddShiftForm({
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-500">Rate ($)</label>
+          <label className="block text-xs text-[color:var(--muted)]">Rate ($)</label>
           <input
             type="number"
             step="0.01"
@@ -162,7 +162,7 @@ export function AddShiftForm({
         </div>
 
         <div className="sm:col-span-4">
-          <label className="block text-xs text-zinc-500">Notes</label>
+          <label className="block text-xs text-[color:var(--muted)]">Notes</label>
           <input name="notes" className="input mt-1" maxLength={500} />
         </div>
 

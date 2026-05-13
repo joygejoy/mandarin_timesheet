@@ -140,7 +140,7 @@ function Row({
             </div>
           )}
         </td>
-        <td className="px-3 py-2 text-zinc-500">{s.notes ?? ''}</td>
+        <td className="px-3 py-2 text-[color:var(--muted)]">{s.notes ?? ''}</td>
       </tr>
     )
   }
@@ -161,7 +161,7 @@ function Row({
           className="min-w-44"
         />
         {!s.employee_id && (
-          <p className="mt-1 text-[10px] text-zinc-400">unlinked from roster</p>
+          <p className="mt-1 text-[10px] text-[color:var(--muted)]">unlinked from roster</p>
         )}
       </td>
       <td className="px-3 py-2">
@@ -223,10 +223,10 @@ function Row({
         />
       </td>
       <td className="px-3 py-2 text-right tabular-nums">
-        {incomplete ? <span className="text-zinc-400">—</span> : hours.toFixed(2)}
+        {incomplete ? <span className="text-[color:var(--muted)]">—</span> : hours.toFixed(2)}
       </td>
       <td className="px-3 py-2 text-right tabular-nums">
-        {incomplete ? <span className="text-zinc-400">—</span> : `$${pay.toFixed(2)}`}
+        {incomplete ? <span className="text-[color:var(--muted)]">—</span> : `$${pay.toFixed(2)}`}
         {!incomplete && mealDeduction > 0 && (
           <div
             className="text-[10px] text-[color:var(--muted)]"
@@ -236,7 +236,7 @@ function Row({
           </div>
         )}
         {minutes > 0 && (
-          <div className="text-[10px] text-zinc-400">{formatMinutes(minutes)}</div>
+          <div className="text-[10px] text-[color:var(--muted)]">{formatMinutes(minutes)}</div>
         )}
       </td>
       <td className="px-3 py-2">
@@ -248,7 +248,7 @@ function Row({
           onBlur={() => commit({ notes: s.notes ?? null })}
         />
         {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
-        {pending && <p className="mt-1 text-[10px] text-zinc-400">saving…</p>}
+        {pending && <p className="mt-1 text-[10px] text-[color:var(--muted)]">saving…</p>}
       </td>
       <td className="px-3 py-2 text-right">
         <DeleteShiftButton id={s.id} sheetId={sheetId} name={s.employee_name_snapshot} />

@@ -120,11 +120,12 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
     startTransition(async () => {
       try {
         await deleteEmployees(Array.from(selected))
-        clearSelection()
-        setSelectMode(false)
         router.refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Delete failed')
+      } finally {
+        setSelectMode(false)
+        clearSelection()
       }
     })
   }

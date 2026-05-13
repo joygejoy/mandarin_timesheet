@@ -15,7 +15,22 @@ export async function createPayPeriod(formData: FormData) {
   if (data.end_date < data.start_date) {
     throw new Error('End date must be on or after start date.')
   }
+  const days = (new Date(data.end_date + 'T00:00:00').getTime() - new Date(data.start_date + 'T00:00:00').getTime()) / (1000 * 60 * 60 * 24)
+  if (days > 31) {
+    throw new Error('Pay period cannot exceed 31 days.')
+  }
   const supabase = getSupabaseAdmin()
+  // A period [s1, e1] overlaps [s2, e2] when s1 <= e2 AND e1 >= s2
+  const { data: overlapping } = await supabase
+    .from('pay_periods')
+    .select('id, start_date, end_date')
+    .lte('start_date', data.end_date)
+    .gte('end_date', data.start_date)
+    .limit(1)
+  if (overlapping && overlapping.length > 0) {
+    const o = overlapping[0]
+    throw new Error(`Date range overlaps with existing period ${o.start_date} → ${o.end_date}. Adjust the dates.`)
+  }
   const { data: row, error } = await supabase
     .from('pay_periods')
     .insert({ start_date: data.start_date, end_date: data.end_date, status: 'open' })

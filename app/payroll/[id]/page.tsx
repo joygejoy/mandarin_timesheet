@@ -244,7 +244,11 @@ function Calendar({
             : isDraft
             ? 'bg-[color:var(--accent)]'
             : 'bg-transparent border border-[color:var(--border-strong)]'
-          const cls = sheet
+          const cls = isApproved
+            ? 'surface border-l-2 border-l-[color:var(--success)] bg-[color:var(--success)]/10 hover:border-[color:var(--border-strong)]'
+            : isDraft
+            ? 'surface border-l-2 border-l-[color:var(--accent)] bg-[color:var(--accent)]/10 hover:border-[color:var(--border-strong)]'
+            : sheet
             ? 'surface hover:border-[color:var(--border-strong)]'
             : 'surface border-dashed text-[color:var(--muted)]'
           const inner = (

@@ -2,11 +2,12 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { summarizeDay } from '@/lib/payroll'
-import { addShift, setDailySheetStatus, deleteDailySheet } from '../actions'
+import { addShift, setDailySheetStatus } from '../actions'
 import { ShiftRows } from './ShiftRows'
 import { AddShiftForm } from './AddShiftForm'
 import { AlcoholSection } from './AlcoholSection'
 import { ScanPhotoPanel } from './ScanPhotoPanel'
+import { DeleteSheetButton } from './DeleteSheetButton'
 import type { DailySheet, Shift, Employee, PayPeriod, AlcoholSale } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -113,10 +114,12 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
         </section>
       )}
 
-      <section className="mt-8">
-        <h2 className="mb-3 text-sm text-[color:var(--muted)]">Add a shift</h2>
-        <AddShiftForm dailySheetId={sheet.id} employees={employees} addShift={addShift} />
-      </section>
+      {sheet.status !== 'approved' && (
+        <section className="mt-8">
+          <h2 className="mb-3 text-sm text-[color:var(--muted)]">Add a shift</h2>
+          <AddShiftForm dailySheetId={sheet.id} employees={employees} addShift={addShift} />
+        </section>
+      )}
 
       <section className="mt-8">
         <h2 className="mb-3 text-sm text-[color:var(--muted)]">
@@ -151,10 +154,6 @@ function SheetActions({ sheet, hasShifts }: { sheet: DailySheet; hasShifts: bool
     'use server'
     await setDailySheetStatus(sheet.id, 'draft')
   }
-  async function del() {
-    'use server'
-    await deleteDailySheet(sheet.id)
-  }
   return (
     <div className="flex gap-2">
       {sheet.status === 'approved' ? (
@@ -166,22 +165,13 @@ function SheetActions({ sheet, hasShifts }: { sheet: DailySheet; hasShifts: bool
       ) : (
         hasShifts && (
           <form action={approve}>
-            <button className="btn-primary" type="submit">
+            <button className="btn-tertiary" type="submit">
               Approve day
             </button>
           </form>
         )
       )}
-      <form action={del}>
-        <button
-          className="text-xs text-rose-600 hover:underline"
-          type="submit"
-          // confirm via a tiny inline pattern; full client confirm modal would be overkill
-          formNoValidate
-        >
-          Delete sheet
-        </button>
-      </form>
+      <DeleteSheetButton sheetId={sheet.id} />
     </div>
   )
 }

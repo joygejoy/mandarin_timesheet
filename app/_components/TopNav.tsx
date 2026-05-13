@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { LogoutButton } from './LogoutButton'
 
 const NAV = [
+  { href: '/', label: 'Dashboard' },
   { href: '/scan', label: 'Scan Timesheet' },
   { href: '/shifts', label: 'Daily Shifts' },
   { href: '/alcohol', label: 'Alcohol Sales' },
