@@ -37,6 +37,16 @@ export async function createPayPeriod(formData: FormData) {
     .select('id')
     .single()
   if (error) throw new Error(error.message)
+
+  // Back-fill any daily sheets that already exist inside this date range
+  // but weren't linked to a period yet.
+  await supabase
+    .from('daily_sheets')
+    .update({ pay_period_id: row.id })
+    .gte('sheet_date', data.start_date)
+    .lte('sheet_date', data.end_date)
+    .is('pay_period_id', null)
+
   revalidatePath('/payroll')
   redirect(`/payroll/${row.id}`)
 }
