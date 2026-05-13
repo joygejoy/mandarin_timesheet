@@ -22,6 +22,8 @@ const PAGE_SIZE = 10
 export function EmployeesClient({ employees }: { employees: Employee[] }) {
   const router = useRouter()
   const [query, setQuery] = useState('')
+  const [empNoMin, setEmpNoMin] = useState('')
+  const [empNoMax, setEmpNoMax] = useState('')
   const [page, setPage] = useState(1)
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -30,13 +32,15 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return employees
-    return employees.filter(
-      (e) =>
-        e.full_name.toLowerCase().includes(q) ||
-        (e.role ?? '').toLowerCase().includes(q)
-    )
-  }, [employees, query])
+    const minNum = empNoMin === '' ? null : Number(empNoMin)
+    const maxNum = empNoMax === '' ? null : Number(empNoMax)
+    return employees.filter((e) => {
+      if (q && !e.full_name.toLowerCase().includes(q) && !(e.role ?? '').toLowerCase().includes(q)) return false
+      if (minNum !== null && (e.employee_number === null || e.employee_number < minNum)) return false
+      if (maxNum !== null && (e.employee_number === null || e.employee_number > maxNum)) return false
+      return true
+    })
+  }, [employees, query, empNoMin, empNoMax])
 
   const sorted = useMemo(
     () =>
@@ -48,11 +52,10 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
 
-  // Reset to page 1 whenever the filter changes results, and clamp the
-  // current page if a delete shrank the list.
+  // Reset to page 1 whenever any filter changes, and clamp if a delete shrank the list.
   useEffect(() => {
     setPage(1)
-  }, [query])
+  }, [query, empNoMin, empNoMax])
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
   }, [page, totalPages])
@@ -192,6 +195,10 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
       <Toolbar
         query={query}
         setQuery={setQuery}
+        empNoMin={empNoMin}
+        setEmpNoMin={setEmpNoMin}
+        empNoMax={empNoMax}
+        setEmpNoMax={setEmpNoMax}
         selectMode={selectMode}
         setSelectMode={setSelectMode}
         selectedCount={selected.size}
@@ -254,6 +261,10 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
 function Toolbar({
   query,
   setQuery,
+  empNoMin,
+  setEmpNoMin,
+  empNoMax,
+  setEmpNoMax,
   selectMode,
   setSelectMode,
   selectedCount,
@@ -269,6 +280,10 @@ function Toolbar({
 }: {
   query: string
   setQuery: (s: string) => void
+  empNoMin: string
+  setEmpNoMin: (s: string) => void
+  empNoMax: string
+  setEmpNoMax: (s: string) => void
   selectMode: boolean
   setSelectMode: (v: boolean) => void
   selectedCount: number
@@ -294,6 +309,26 @@ function Toolbar({
           onChange={(e) => setQuery(e.target.value)}
           placeholder={`Search ${totalCount} employee${totalCount === 1 ? '' : 's'}…`}
           className="input pl-7"
+        />
+      </div>
+      <div className="flex items-center gap-1">
+        <span className="text-xs text-[color:var(--muted)]">Emp #</span>
+        <input
+          type="number"
+          min="1"
+          value={empNoMin}
+          onChange={(e) => setEmpNoMin(e.target.value)}
+          placeholder="min"
+          className="input w-20 tabular-nums text-sm"
+        />
+        <span className="text-xs text-[color:var(--muted)]">–</span>
+        <input
+          type="number"
+          min="1"
+          value={empNoMax}
+          onChange={(e) => setEmpNoMax(e.target.value)}
+          placeholder="max"
+          className="input w-20 tabular-nums text-sm"
         />
       </div>
 
@@ -477,6 +512,11 @@ function NameBlock({ employee }: { employee: Employee }) {
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2">
+        {e.employee_number != null && (
+          <span className="shrink-0 rounded bg-[color:var(--surface-container)] px-1.5 py-0.5 text-[11px] tabular-nums text-[color:var(--muted)]">
+            #{e.employee_number}
+          </span>
+        )}
         <span
           className={`truncate text-sm font-medium ${
             e.active ? '' : 'text-[color:var(--muted)]'

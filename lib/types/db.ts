@@ -3,6 +3,7 @@
 export type Employee = {
   id: string
   full_name: string
+  employee_number: number | null
   role: string | null
   hourly_rate: number
   age: number | null

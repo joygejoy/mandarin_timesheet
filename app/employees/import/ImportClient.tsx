@@ -12,6 +12,7 @@ type Candidate = {
   id: string                    // local-only client id
   include: boolean
   full_name: string
+  employee_number: string       // string so empty input stays empty
   role: string
   hourly_rate: number
   age: string                   // string so empty input stays empty
@@ -23,7 +24,7 @@ type Candidate = {
 }
 
 type ApiResponse = {
-  employees?: { name: string; role: string | null; confidence: number; source_note: string | null }[]
+  employees?: { name: string; role: string | null; employee_number: number | null; confidence: number; source_note: string | null }[]
   error?: string
 }
 
@@ -73,6 +74,7 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
         id: `c${i}`,
         include: true,
         full_name: e.name.trim(),
+        employee_number: e.employee_number != null ? String(e.employee_number) : '',
         role: e.role?.trim() ?? '',
         hourly_rate: DEFAULT_WAGE_RATE,
         age: '',
@@ -95,6 +97,7 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
       .filter((c) => c.include && c.full_name.trim().length > 0)
       .map((c) => ({
         full_name: c.full_name.trim(),
+        employee_number: c.employee_number === '' ? undefined : Number(c.employee_number),
         role: c.role.trim() || undefined,
         hourly_rate: c.hourly_rate,
         age: c.age === '' ? undefined : Number(c.age),
@@ -259,6 +262,7 @@ function CandidateTable({
         <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
           <tr>
             <th className="w-10 px-3 py-2.5"></th>
+            <th className="px-3 py-2.5 font-normal">Emp #</th>
             <th className="px-3 py-2.5 font-normal">Name</th>
             <th className="px-3 py-2.5 font-normal">Role</th>
             <th className="px-3 py-2.5 font-normal">Rate</th>
@@ -283,6 +287,16 @@ function CandidateTable({
                     type="checkbox"
                     checked={c.include}
                     onChange={(e) => onChange(c.id, { include: e.target.checked })}
+                  />
+                </td>
+                <td className="px-3 py-2 align-top">
+                  <input
+                    className="input w-20 tabular-nums"
+                    type="number"
+                    min="1"
+                    placeholder="—"
+                    value={c.employee_number}
+                    onChange={(e) => onChange(c.id, { employee_number: e.target.value })}
                   />
                 </td>
                 <td className="px-3 py-2 align-top">

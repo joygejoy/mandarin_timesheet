@@ -11,6 +11,7 @@ const MAX_BYTES = 10 * 1024 * 1024 // 10 MB
 type ExtractedEmployee = {
   name: string
   role: string | null
+  employee_number: number | null
   confidence: number
   source_note: string | null
 }
@@ -140,6 +141,21 @@ function classifyFile(file: File): 'image' | 'text' | 'pdf' | 'excel' | 'unknown
   return 'unknown'
 }
 
+const EMP_NO_HEADERS = new Set([
+  'emp. no.',
+  'emp no',
+  'emp no.',
+  'employee no',
+  'employee no.',
+  'employee number',
+  'emp #',
+  'emp#',
+  'no.',
+  '#',
+  'id',
+  'number',
+])
+
 // Header cells we recognize. Used both to detect a header row and to pick which
 // column holds the name vs the role. Order inside each set doesn't matter.
 const NAME_HEADERS = new Set([
@@ -183,6 +199,9 @@ const ANY_KNOWN_HEADER = new Set<string>([
   'date',
 ])
 
+// Remove emp-no headers from ANY_KNOWN_HEADER since we now track them in EMP_NO_HEADERS
+// (they were duplicated there before). Keep them in the set for header detection.
+
 // Things that look like rows but aren't people.
 const SKIP_ROW_FIRST_CELL = new Set([
   'total',
@@ -195,6 +214,7 @@ const SKIP_ROW_FIRST_CELL = new Set([
 type ColumnLayout = {
   nameIdx: number
   roleIdx: number | null
+  empNoIdx: number | null
 }
 
 function looksLikeHeader(cells: string[]): boolean {
@@ -208,12 +228,14 @@ function looksLikeHeader(cells: string[]): boolean {
 function detectColumnLayout(headerCells: string[]): ColumnLayout {
   let nameIdx = -1
   let roleIdx: number | null = null
+  let empNoIdx: number | null = null
   for (let i = 0; i < headerCells.length; i++) {
     const k = headerCells[i].toLowerCase().trim()
     if (nameIdx === -1 && NAME_HEADERS.has(k)) nameIdx = i
     else if (roleIdx === null && ROLE_HEADERS.has(k)) roleIdx = i
+    if (empNoIdx === null && EMP_NO_HEADERS.has(k)) empNoIdx = i
   }
-  return { nameIdx, roleIdx }
+  return { nameIdx, roleIdx, empNoIdx }
 }
 
 const NUMERIC_RE = /^[\d.,\s$%-]+$/
@@ -230,7 +252,7 @@ function parseTextEmployees(text: string): ExtractedEmployee[] {
   const delim = detectDelimiter(lines)
   // Default layout: column 0 is the name, no role column. Updated as soon as
   // we see a header row.
-  let layout: ColumnLayout = { nameIdx: 0, roleIdx: 1 }
+  let layout: ColumnLayout = { nameIdx: 0, roleIdx: 1, empNoIdx: null }
   let sawHeader = false
 
   const seenLower = new Set<string>()
@@ -283,9 +305,17 @@ function parseTextEmployees(text: string): ExtractedEmployee[] {
       if (r && r.toLowerCase() !== 'role') role = r
     }
 
+    let employee_number: number | null = null
+    if (layout.empNoIdx != null) {
+      const raw = (cells[layout.empNoIdx] ?? '').trim()
+      const n = parseInt(raw, 10)
+      if (!isNaN(n) && n > 0) employee_number = n
+    }
+
     out.push({
       name,
       role,
+      employee_number,
       confidence: 1,
       source_note: `row ${i + 1}`,
     })

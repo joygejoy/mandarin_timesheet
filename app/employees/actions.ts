@@ -8,6 +8,7 @@ import { ONTARIO_WAGE_PRESETS } from '@/lib/wages'
 
 const EmployeeInput = z.object({
   full_name: z.string().trim().min(1, 'Name required').max(120),
+  employee_number: z.coerce.number().int().min(1).optional().or(z.literal('')),
   role: z.string().trim().max(60).optional().or(z.literal('')),
   hourly_rate: z.coerce.number().min(0).max(999),
   age: z.coerce.number().int().min(0).max(120).optional().or(z.literal('')),
@@ -36,6 +37,7 @@ export async function createEmployee(formData: FormData) {
   const supabase = getSupabaseAdmin()
   const { error } = await supabase.from('employees').insert({
     full_name: data.full_name,
+    employee_number: clean(data.employee_number),
     role: clean(data.role),
     hourly_rate: data.hourly_rate,
     age: clean(data.age),
@@ -56,6 +58,7 @@ export async function updateEmployee(id: string, formData: FormData) {
     .from('employees')
     .update({
       full_name: data.full_name,
+      employee_number: clean(data.employee_number),
       role: clean(data.role),
       hourly_rate: data.hourly_rate,
       age: clean(data.age),

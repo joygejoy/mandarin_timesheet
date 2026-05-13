@@ -7,6 +7,7 @@ import { normalizeEmployeeName } from '@/lib/normalize'
 
 const ImportRow = z.object({
   full_name: z.string().trim().min(1).max(120),
+  employee_number: z.coerce.number().int().min(1).optional().nullable(),
   role: z.string().trim().max(60).optional().nullable(),
   hourly_rate: z.coerce.number().min(0).max(999),
   age: z.coerce.number().int().min(0).max(120).optional().nullable(),
@@ -56,6 +57,7 @@ export async function bulkImportEmployees(rows: BulkImportInput): Promise<BulkIm
     existingKeys.add(key)
     toInsert.push({
       full_name: parsed.full_name,
+      employee_number: parsed.employee_number ?? null,
       role: parsed.role || null,
       hourly_rate: parsed.hourly_rate,
       age: parsed.age ?? null,

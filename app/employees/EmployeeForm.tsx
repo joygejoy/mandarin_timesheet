@@ -17,15 +17,27 @@ export function EmployeeForm({ action, employee, submitLabel }: Props) {
 
   return (
     <form action={action} className="grid max-w-xl gap-4">
-      <Field label="Full name" required>
-        <input
-          name="full_name"
-          required
-          defaultValue={e?.full_name ?? ''}
-          className="input"
-          autoComplete="off"
-        />
-      </Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Full name" required>
+          <input
+            name="full_name"
+            required
+            defaultValue={e?.full_name ?? ''}
+            className="input"
+            autoComplete="off"
+          />
+        </Field>
+        <Field label="Employee #">
+          <input
+            name="employee_number"
+            type="number"
+            min="1"
+            defaultValue={e?.employee_number ?? ''}
+            className="input tabular-nums"
+            placeholder="e.g. 758"
+          />
+        </Field>
+      </div>
 
       <Field label="Role">
         <input name="role" defaultValue={e?.role ?? ''} className="input" />
