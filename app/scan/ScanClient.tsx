@@ -81,6 +81,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [meta, setMeta] = useState<SheetMeta | null>(null)
   const [rawOcr, setRawOcr] = useState<unknown>(null)
+  const [manualDate, setManualDate] = useState<string>('')
   const [sheetDate, setSheetDate] = useState<string>('')
   const [approvedBy, setApprovedBy] = useState<string>('')
   const [savedSheetId, setSavedSheetId] = useState<string | null>(null)
@@ -98,6 +99,10 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   }
 
   async function onFileChosen(file: File) {
+    if (!manualDate) {
+      setError('Enter the sheet date before scanning.')
+      return
+    }
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setPreviewUrl(URL.createObjectURL(file))
     setError(null)
@@ -131,9 +136,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
       approved_by_signature: sheet.approved_by_signature,
       notes: sheet.notes,
     })
-    const d = new Date()
-    const localToday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    setSheetDate(sheet.date_iso ?? localToday)
+    setSheetDate(manualDate)
     setApprovedBy(sheet.approved_by_signature ?? '')
 
     const built = sheet.shifts.map((s, i): Candidate => {
@@ -281,6 +284,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setMeta(null)
     setRawOcr(null)
     setScanImagePath(null)
+    setManualDate('')
     setSheetDate('')
     setApprovedBy('')
     setSavedSheetId(null)
@@ -335,9 +339,35 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     return (
       <div className="mx-auto max-w-lg space-y-4">
         {step === 'pick' ? (
-          <DropZone fileInputRef={fileInput} onFileChosen={onFileChosen} />
+          <>
+            <div className="surface p-4">
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-medium text-[color:var(--muted)]">
+                  Sheet date <span className="text-rose-500">*</span>
+                </span>
+                <input
+                  type="date"
+                  required
+                  value={manualDate}
+                  onChange={(e) => setManualDate(e.target.value)}
+                  className="input"
+                  aria-label="Date of the timesheet"
+                />
+              </label>
+              <p className="mt-1.5 text-xs text-[color:var(--muted)]">
+                Enter the date on the paper sheet before scanning.
+              </p>
+            </div>
+            <DropZone fileInputRef={fileInput} onFileChosen={onFileChosen} />
+          </>
         ) : (
-          <ExtractingView previewUrl={previewUrl} />
+          <>
+            <div className="surface p-4">
+              <p className="mb-1 text-xs font-medium text-[color:var(--muted)]">Sheet date</p>
+              <p className="text-sm font-semibold">{manualDate}</p>
+            </div>
+            <ExtractingView previewUrl={previewUrl} />
+          </>
         )}
         {error && (
           <div className="rounded-md border border-rose-200 bg-rose-50/60 p-3 text-sm text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">

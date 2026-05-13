@@ -8,6 +8,7 @@ import { AddShiftForm } from './AddShiftForm'
 import { AlcoholSection } from './AlcoholSection'
 import { ScanPhotoPanel } from './ScanPhotoPanel'
 import { DeleteSheetButton } from './DeleteSheetButton'
+import { ChangeDateButton } from './ChangeDateButton'
 import type { DailySheet, Shift, Employee, PayPeriod, AlcoholSale } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -82,7 +83,7 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
         </Link>
         <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">{fmtDateLong(sheet.sheet_date)}</h1>
+            <ChangeDateButton sheetId={sheet.id} currentDate={sheet.sheet_date} />
             <p className="mt-1 text-sm text-[color:var(--muted)]">
               <span className="font-medium text-[color:var(--foreground)]">{sheet.status}</span>
               {period ? (
@@ -226,14 +227,6 @@ function Card({
   )
 }
 
-function fmtDateLong(iso: string) {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
 function fmtShort(iso: string) {
   return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
     month: 'short',

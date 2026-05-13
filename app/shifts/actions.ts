@@ -246,3 +246,20 @@ export async function deleteAlcoholSale(id: string, sheetId: string) {
   if (error) throw new Error(error.message)
   revalidatePath(`/shifts/${sheetId}`)
 }
+
+export async function updateSheetDate(id: string, newDate: string): Promise<{ error?: string }> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) return { error: 'Invalid date format.' }
+  const supabase = getSupabaseAdmin()
+  const { data: conflict } = await supabase
+    .from('daily_sheets')
+    .select('id')
+    .eq('sheet_date', newDate)
+    .neq('id', id)
+    .maybeSingle()
+  if (conflict) return { error: `A sheet for ${newDate} already exists.` }
+  const { error } = await supabase.from('daily_sheets').update({ sheet_date: newDate }).eq('id', id)
+  if (error) return { error: error.message }
+  revalidatePath('/shifts')
+  revalidatePath(`/shifts/${id}`)
+  return {}
+}
