@@ -19,11 +19,12 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 const NON_ALPHA = '#'
 const PAGE_SIZE = 10
 
+type SortOrder = 'name' | 'num-asc' | 'num-desc'
+
 export function EmployeesClient({ employees }: { employees: Employee[] }) {
   const router = useRouter()
   const [query, setQuery] = useState('')
-  const [empNoMin, setEmpNoMin] = useState('')
-  const [empNoMax, setEmpNoMax] = useState('')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('name')
   const [page, setPage] = useState(1)
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -32,30 +33,44 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const minNum = empNoMin === '' ? null : Number(empNoMin)
-    const maxNum = empNoMax === '' ? null : Number(empNoMax)
     return employees.filter((e) => {
-      if (q && !e.full_name.toLowerCase().includes(q) && !(e.role ?? '').toLowerCase().includes(q)) return false
-      if (minNum !== null && (e.employee_number === null || e.employee_number < minNum)) return false
-      if (maxNum !== null && (e.employee_number === null || e.employee_number > maxNum)) return false
-      return true
+      if (!q) return true
+      if (e.full_name.toLowerCase().includes(q)) return true
+      if ((e.role ?? '').toLowerCase().includes(q)) return true
+      if (e.employee_number != null && String(e.employee_number).includes(q)) return true
+      return false
     })
-  }, [employees, query, empNoMin, empNoMax])
+  }, [employees, query])
 
-  const sorted = useMemo(
-    () =>
-      [...filtered].sort((a, b) =>
-        a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })
-      ),
-    [filtered]
-  )
+  const sorted = useMemo(() => {
+    const arr = [...filtered]
+    if (sortOrder === 'num-asc') {
+      return arr.sort((a, b) => {
+        if (a.employee_number == null && b.employee_number == null) return 0
+        if (a.employee_number == null) return 1
+        if (b.employee_number == null) return -1
+        return a.employee_number - b.employee_number
+      })
+    }
+    if (sortOrder === 'num-desc') {
+      return arr.sort((a, b) => {
+        if (a.employee_number == null && b.employee_number == null) return 0
+        if (a.employee_number == null) return 1
+        if (b.employee_number == null) return -1
+        return b.employee_number - a.employee_number
+      })
+    }
+    return arr.sort((a, b) =>
+      a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })
+    )
+  }, [filtered, sortOrder])
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
 
-  // Reset to page 1 whenever any filter changes, and clamp if a delete shrank the list.
+  // Reset to page 1 whenever any filter/sort changes, and clamp if a delete shrank the list.
   useEffect(() => {
     setPage(1)
-  }, [query, empNoMin, empNoMax])
+  }, [query, sortOrder])
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
   }, [page, totalPages])
@@ -195,10 +210,8 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
       <Toolbar
         query={query}
         setQuery={setQuery}
-        empNoMin={empNoMin}
-        setEmpNoMin={setEmpNoMin}
-        empNoMax={empNoMax}
-        setEmpNoMax={setEmpNoMax}
+        sortOrder={sortOrder}
+        setSortOrder={setSortOrder}
         selectMode={selectMode}
         setSelectMode={setSelectMode}
         selectedCount={selected.size}
@@ -236,10 +249,12 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
           )}
         </div>
 
-        <AlphabetJump
-          lettersWithRows={new Set(letterToPage.keys())}
-          onJump={jumpToLetter}
-        />
+        {sortOrder === 'name' && (
+          <AlphabetJump
+            lettersWithRows={new Set(letterToPage.keys())}
+            onJump={jumpToLetter}
+          />
+        )}
       </div>
 
       {sorted.length > 0 && (
@@ -261,10 +276,8 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
 function Toolbar({
   query,
   setQuery,
-  empNoMin,
-  setEmpNoMin,
-  empNoMax,
-  setEmpNoMax,
+  sortOrder,
+  setSortOrder,
   selectMode,
   setSelectMode,
   selectedCount,
@@ -280,10 +293,8 @@ function Toolbar({
 }: {
   query: string
   setQuery: (s: string) => void
-  empNoMin: string
-  setEmpNoMin: (s: string) => void
-  empNoMax: string
-  setEmpNoMax: (s: string) => void
+  sortOrder: SortOrder
+  setSortOrder: (s: SortOrder) => void
   selectMode: boolean
   setSelectMode: (v: boolean) => void
   selectedCount: number
@@ -307,30 +318,20 @@ function Toolbar({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Search ${totalCount} employee${totalCount === 1 ? '' : 's'}…`}
+          placeholder={`Search ${totalCount} employee${totalCount === 1 ? '' : 's'} by name, role, or #…`}
           className="input pl-7"
         />
       </div>
-      <div className="flex items-center gap-1">
-        <span className="text-xs text-[color:var(--muted)]">Emp #</span>
-        <input
-          type="number"
-          min="1"
-          value={empNoMin}
-          onChange={(e) => setEmpNoMin(e.target.value)}
-          placeholder="min"
-          className="input w-20 tabular-nums text-sm"
-        />
-        <span className="text-xs text-[color:var(--muted)]">–</span>
-        <input
-          type="number"
-          min="1"
-          value={empNoMax}
-          onChange={(e) => setEmpNoMax(e.target.value)}
-          placeholder="max"
-          className="input w-20 tabular-nums text-sm"
-        />
-      </div>
+      <select
+        value={sortOrder}
+        onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+        className="input w-auto text-sm"
+        aria-label="Sort employees"
+      >
+        <option value="name">Name A–Z</option>
+        <option value="num-asc">Emp # Low → High</option>
+        <option value="num-desc">Emp # High → Low</option>
+      </select>
 
       <div className="ml-auto flex items-center gap-2">
         {selectMode ? (
