@@ -108,8 +108,13 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setError(null)
     setStep('extracting')
 
+    // Vercel caps serverless payloads at 4.5 MB. Phone cameras produce 8–15 MB
+    // JPEGs, so compress client-side first. OpenAI's vision API processes images
+    // at 2048 px max anyway, so accuracy is unchanged.
+    const uploadBlob = await compressImage(file)
+
     const fd = new FormData()
-    fd.append('file', file, file.name)
+    fd.append('file', uploadBlob, file.name.replace(/\.[^.]+$/, '.jpg'))
     let res: Response
     try {
       res = await fetch('/api/shifts/extract', { method: 'POST', body: fd })
@@ -575,7 +580,7 @@ function DropZone({
           Tap to open your camera, or drag an image here
         </p>
         <p className="text-xs text-[color:var(--muted)]">
-          JPG · PNG · HEIC · up to 10 MB · takes 10–30 s
+          JPG · PNG · HEIC · auto-compressed · takes 10–30 s
         </p>
       </div>
     </div>
@@ -1169,6 +1174,35 @@ function formatTime12(hhmm: string): string {
   const period = h >= 12 ? 'PM' : 'AM'
   const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
   return `${h12}:${String(min).padStart(2, '0')} ${period}`
+}
+
+/**
+ * Resize + re-encode to JPEG so the upload stays under Vercel's 4.5 MB
+ * serverless payload limit. Caps the longest side at 2048 px, which matches
+ * what OpenAI's vision API processes internally — no accuracy loss.
+ */
+async function compressImage(file: File, maxSide = 2048, quality = 0.85): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height))
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('Image compression failed'))),
+        'image/jpeg',
+        quality,
+      )
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')) }
+    img.src = url
+  })
 }
 
 /**
