@@ -28,6 +28,7 @@ export type DailySheet = {
   sheet_date: string
   pay_period_id: string | null
   status: 'draft' | 'reviewing' | 'approved'
+  shift_type: 'lunch' | 'dinner' | 'both' | null
   scan_image_path: string | null
   notes: string | null
   approved_at: string | null

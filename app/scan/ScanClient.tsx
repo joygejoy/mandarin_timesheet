@@ -22,6 +22,7 @@ type Candidate = {
   meal_provided: boolean
   initials: string
   notes: string
+  drink_points: number
   confidence: number
   inferred_from_bracket: boolean
   needs_review: boolean
@@ -38,6 +39,21 @@ type SheetMeta = {
   shift_type: 'lunch' | 'dinner' | 'both' | null
   approved_by_signature: string | null
   notes: string | null
+}
+
+type BatchItem = {
+  id: string
+  file: File
+  previewUrl: string
+  date: string
+  shiftType: 'lunch' | 'dinner'
+  rotation: 0 | 90 | 180 | 270
+  /** 'auto' = date came from file metadata; 'manual' = user typed/picked it */
+  dateSource: 'auto' | 'manual'
+  /** OCR pre-fetch runs in the background while user fills in the form */
+  ocrStatus: 'processing' | 'done' | 'error'
+  ocrResult: ApiResponse | null
+  ocrError: string | null
 }
 
 type ApiResponse = {
@@ -76,7 +92,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   const router = useRouter()
   const fileInput = useRef<HTMLInputElement>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [step, setStep] = useState<'pick' | 'extracting' | 'review' | 'saving' | 'done'>('pick')
+  const [step, setStep] = useState<'pick' | 'preview' | 'batch-stage' | 'extracting' | 'review' | 'saving' | 'done'>('pick')
   const [error, setError] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [meta, setMeta] = useState<SheetMeta | null>(null)
@@ -87,6 +103,16 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   const [savedSheetId, setSavedSheetId] = useState<string | null>(null)
   const [scanImagePath, setScanImagePath] = useState<string | null>(null)
   const [, startTransition] = useTransition()
+  // Single-upload rotation preview before OCR fires
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [singleRotation, setSingleRotation] = useState<0 | 90 | 180 | 270>(0)
+  // Single-sheet shift type hint (let user pre-select before scanning)
+  const [shiftTypeHint, setShiftTypeHint] = useState<'lunch' | 'dinner' | null>(null)
+  // Batch state
+  const [batchItems, setBatchItems] = useState<BatchItem[]>([])
+  const [batchQueue, setBatchQueue] = useState<BatchItem[]>([])
+  const [batchSaved, setBatchSaved] = useState(0)
+  const [batchTotal, setBatchTotal] = useState(0)
 
   const employeeByLowerName = useMemo(() => {
     const m = new Map<string, Employee>()
@@ -98,8 +124,15 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     return employeeByLowerName.get(name.trim().toLowerCase())
   }
 
-  async function onFileChosen(file: File) {
-    if (!manualDate) {
+  async function onFileChosen(
+    file: File,
+    overrideDate?: string,
+    overrideShiftType?: 'lunch' | 'dinner',
+    preloadedResult?: ApiResponse,
+    rotation = 0,
+  ) {
+    const useDate = overrideDate ?? manualDate
+    if (!useDate) {
       setError('Enter the sheet date before scanning.')
       return
     }
@@ -108,30 +141,34 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setError(null)
     setStep('extracting')
 
-    // Vercel caps serverless payloads at 4.5 MB. Phone cameras produce 8–15 MB
-    // JPEGs, so compress client-side first. OpenAI's vision API processes images
-    // at 2048 px max anyway, so accuracy is unchanged.
-    const uploadBlob = await compressImage(file)
-
-    const fd = new FormData()
-    fd.append('file', uploadBlob, file.name.replace(/\.[^.]+$/, '.jpg'))
-    let res: Response
-    try {
-      res = await fetch('/api/shifts/extract', { method: 'POST', body: fd })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Network error')
-      setStep('pick')
-      return
+    let json: ApiResponse
+    if (preloadedResult?.sheet) {
+      // Already fetched in the background — skip the network wait entirely.
+      json = preloadedResult
+    } else {
+      // Vercel caps serverless payloads at 4.5 MB. Phone cameras produce 8–15 MB
+      // JPEGs, so compress client-side first. OpenAI's vision API processes images
+      // at 2048 px max anyway, so accuracy is unchanged. Rotation is baked in here.
+      const uploadBlob = await compressImage(file, 2048, 0.85, rotation)
+      const fd = new FormData()
+      fd.append('file', uploadBlob, file.name.replace(/\.[^.]+$/, '.jpg'))
+      let res: Response
+      try {
+        res = await fetch('/api/shifts/extract', { method: 'POST', body: fd })
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Network error')
+        setStep('pick')
+        return
+      }
+      json = (await res.json().catch(() => ({}))) as ApiResponse
+      if (!res.ok || !json.sheet) {
+        setError(json.error ?? `HTTP ${res.status}`)
+        setStep('pick')
+        return
+      }
     }
 
-    const json = (await res.json().catch(() => ({}))) as ApiResponse
-    if (!res.ok || !json.sheet) {
-      setError(json.error ?? `HTTP ${res.status}`)
-      setStep('pick')
-      return
-    }
-
-    const sheet = json.sheet
+    const sheet = json.sheet!
     setRawOcr(sheet)
     setScanImagePath(json.scan_image_path ?? null)
     setMeta({
@@ -141,14 +178,13 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
       approved_by_signature: sheet.approved_by_signature,
       notes: sheet.notes,
     })
-    setSheetDate(manualDate)
+    setSheetDate(useDate)
     setApprovedBy(sheet.approved_by_signature ?? '')
+
+    const isLunch = (overrideShiftType ?? sheet.shift_type) === 'lunch'
 
     const built = sheet.shifts.map((s, i): Candidate => {
       const employee = resolveEmployee(s.employee_name)
-      // Anything below 0.8, or anchored on a bracket-shared time, must be
-      // verified by the manager — bracket misreads silently propagate to
-      // every row in the bracket, so we treat every bracket row as suspect.
       const lowConf = s.confidence < 0.8
       const needsReview =
         lowConf ||
@@ -156,6 +192,24 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         !employee ||
         !s.start_time ||
         !s.end_time
+
+      const rawBreak = s.break_minutes ?? 0
+      // "No Break" in notes is authoritative — always 0, even on lunch shifts.
+      const noBreak = /no[\s-]?break/i.test(s.notes ?? '')
+      // For lunch, default to 30 when break info is genuinely missing (OCR saw
+      // nothing and no annotation). If OCR returned a value, use it.
+      const breakMins = noBreak
+        ? 0
+        : isLunch
+          ? rawBreak <= 0 ? 30 : rawBreak < 22.5 ? 15 : 30
+          : rawBreak
+
+      // Default meal to provided UNLESS the notes explicitly say "no meal".
+      // The OCR returns false as its default (when not mentioned), so we can't
+      // trust meal_provided=false alone — we need the text evidence.
+      const noMeal = /no[\s-]?meal/i.test(s.notes ?? '')
+      const mealProvided = !noMeal
+
       return {
         id: `c${i}`,
         include: true,
@@ -166,10 +220,11 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         section: s.section ?? '',
         start_time: s.start_time ?? '',
         end_time: s.end_time ?? '',
-        break_minutes: s.break_minutes ?? 0,
-        meal_provided: s.meal_provided ?? false,
+        break_minutes: breakMins,
+        meal_provided: mealProvided,
         initials: s.initials ?? '',
         notes: s.notes ?? '',
+        drink_points: 0,
         confidence: s.confidence,
         inferred_from_bracket: s.inferred_from_bracket,
         needs_review: needsReview,
@@ -180,6 +235,66 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     })
     setCandidates(built)
     setStep('review')
+  }
+
+  // Fire-and-forget OCR for one batch item. Updates batchItems state when done.
+  async function startBatchOcr(itemId: string, file: File, rotation = 0) {
+    try {
+      const blob = await compressImage(file, 2048, 0.85, rotation)
+      const fd = new FormData()
+      fd.append('file', blob, file.name.replace(/\.[^.]+$/, '.jpg'))
+      const res = await fetch('/api/shifts/extract', { method: 'POST', body: fd })
+      const json = (await res.json().catch(() => ({}))) as ApiResponse
+      if (!res.ok || !json.sheet) {
+        setBatchItems((prev) =>
+          prev.map((b) => b.id === itemId ? { ...b, ocrStatus: 'error', ocrError: json.error ?? `HTTP ${res.status}` } : b)
+        )
+      } else {
+        setBatchItems((prev) =>
+          prev.map((b) => b.id === itemId ? { ...b, ocrStatus: 'done', ocrResult: json } : b)
+        )
+      }
+    } catch (e) {
+      setBatchItems((prev) =>
+        prev.map((b) => b.id === itemId ? { ...b, ocrStatus: 'error', ocrError: e instanceof Error ? e.message : 'Network error' } : b)
+      )
+    }
+  }
+
+  function onMultipleFilesChosen(files: FileList) {
+    const items: BatchItem[] = Array.from(files).map((f, i) => {
+      const suggested = extractDateFromFile(f)
+      return {
+        id: `b${i}`,
+        file: f,
+        previewUrl: URL.createObjectURL(f),
+        date: suggested,
+        shiftType: 'dinner' as const,
+        rotation: 0 as const,
+        dateSource: suggested ? 'auto' as const : 'manual' as const,
+        ocrStatus: 'processing' as const,
+        ocrResult: null,
+        ocrError: null,
+      }
+    })
+    setBatchItems(items)
+    setStep('batch-stage')
+    // Start OCR for all photos immediately — results arrive while the user
+    // is still filling in dates, so by the time they hit "Scan" most are ready.
+    items.forEach((item) => { startBatchOcr(item.id, item.file) })
+  }
+
+  function handleBatchRotate(id: string, newRotation: 0 | 90 | 180 | 270) {
+    const item = batchItems.find((b) => b.id === id)
+    if (!item) return
+    setBatchItems((prev) =>
+      prev.map((b) =>
+        b.id === id
+          ? { ...b, rotation: newRotation, ocrStatus: 'processing', ocrResult: null, ocrError: null }
+          : b
+      )
+    )
+    startBatchOcr(id, item.file, newRotation)
   }
 
   function patchCandidate(id: string, patch: Partial<Candidate>) {
@@ -219,9 +334,10 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         start_time: '',
         end_time: '',
         break_minutes: 0,
-        meal_provided: false,
+        meal_provided: true,
         initials: '',
         notes: '',
+        drink_points: 0,
         confidence: 1,
         inferred_from_bracket: false,
         needs_review: true,
@@ -260,18 +376,30 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
       return
     }
 
+    const alcoholPoints = candidates
+      .filter((c) => c.include && c.employee_name.trim() && c.drink_points > 0 && !isBusperson(c.role))
+      .map((c) => ({
+        employee_id: c.employee_id,
+        employee_name: c.employee_name.trim(),
+        drink_points: c.drink_points,
+      }))
+
     setStep('saving')
     startTransition(async () => {
       try {
+        const st = meta?.shift_type
         const payload: ApproveInputType = {
           sheet_date: sheetDate,
           approved_by: approvedBy.trim() || null,
           rows,
           raw_ocr: rawOcr,
           scan_image_path: scanImagePath,
+          shift_type: st === 'lunch' || st === 'dinner' || st === 'both' ? st : null,
+          alcohol_points: alcoholPoints.length > 0 ? alcoholPoints : undefined,
         }
         const result = await approveScannedSheet(payload)
         setSavedSheetId(result.daily_sheet_id)
+        setBatchSaved((n) => n + 1)
         setStep('done')
         router.refresh()
       } catch (e) {
@@ -281,8 +409,25 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     })
   }
 
+  async function continueToNext() {
+    const [next, ...rest] = batchQueue
+    setBatchQueue(rest)
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setPreviewUrl(null)
+    setCandidates([])
+    setMeta(null)
+    setRawOcr(null)
+    setScanImagePath(null)
+    setSavedSheetId(null)
+    setError(null)
+    const preloaded = next.ocrStatus === 'done' ? next.ocrResult ?? undefined : undefined
+    await onFileChosen(next.file, next.date, next.shiftType, preloaded, next.rotation)
+  }
+
   function reset() {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
+    batchItems.forEach((b) => URL.revokeObjectURL(b.previewUrl))
+    batchQueue.forEach((b) => URL.revokeObjectURL(b.previewUrl))
     setPreviewUrl(null)
     setStep('pick')
     setCandidates([])
@@ -294,12 +439,21 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setApprovedBy('')
     setSavedSheetId(null)
     setError(null)
+    setBatchItems([])
+    setBatchQueue([])
+    setBatchSaved(0)
+    setBatchTotal(0)
+    setShiftTypeHint(null)
+    setPendingFile(null)
+    setSingleRotation(0)
     if (fileInput.current) fileInput.current.value = ''
   }
 
   // ---- Done ---------------------------------------------------------------
 
   if (step === 'done' && savedSheetId) {
+    const allDone = batchQueue.length === 0
+    const isBatch = batchTotal > 1
     return (
       <div className="flex flex-col items-center gap-6 py-16 text-center animate-[fade-in-up_0.4s_ease_both]">
         <div className="animate-[success-pop_0.5s_cubic-bezier(0.34,1.56,0.64,1)_both]">
@@ -319,21 +473,132 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
           </div>
         </div>
         <div>
-          <p className="text-xl font-semibold">Sheet saved!</p>
+          <p className="text-xl font-semibold">
+            {isBatch && allDone ? `All ${batchTotal} sheets saved!` : 'Sheet saved!'}
+          </p>
           <p className="mt-1 text-sm text-[color:var(--muted)]">
-            {candidates.filter((c) => c.include).length} shifts ·{' '}
-            sheet is in{' '}
-            <strong className="text-[color:var(--foreground)]">review</strong> status
+            {isBatch
+              ? `${batchSaved} of ${batchTotal} done`
+              : `${candidates.filter((c) => c.include).length} shifts · sheet is in `}
+            {!isBatch && (
+              <strong className="text-[color:var(--foreground)]">review</strong>
+            )}
+            {!isBatch && ' status'}
           </p>
         </div>
         <div className="flex flex-wrap justify-center gap-3">
-          <Link href={`/shifts/${savedSheetId}`} className="btn-primary">
-            Open the new sheet
-          </Link>
+          {!allDone ? (
+            <button onClick={continueToNext} className="btn-primary">
+              Next sheet ({batchQueue.length} remaining)
+            </button>
+          ) : (
+            <Link href={`/shifts/${savedSheetId}`} className="btn-primary">
+              Open the last sheet
+            </Link>
+          )}
           <button onClick={reset} className="btn-secondary">
-            Scan another
+            {allDone ? 'Scan more' : 'Stop here'}
           </button>
         </div>
+      </div>
+    )
+  }
+
+  // ---- Batch stage (assign dates + shift types) ---------------------------
+
+  if (step === 'batch-stage') {
+    return (
+      <BatchStageView
+        items={batchItems}
+        onUpdate={(id, patch) =>
+          setBatchItems((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)))
+        }
+        onRotate={handleBatchRotate}
+        onConfirm={() => {
+          const [first, ...rest] = batchItems
+          setBatchQueue(rest)
+          setBatchTotal(batchItems.length)
+          setBatchSaved(0)
+          const preloaded = first.ocrStatus === 'done' ? first.ocrResult ?? undefined : undefined
+          onFileChosen(first.file, first.date, first.shiftType, preloaded, first.rotation)
+        }}
+        onCancel={() => {
+          batchItems.forEach((b) => URL.revokeObjectURL(b.previewUrl))
+          setBatchItems([])
+          setStep('pick')
+        }}
+      />
+    )
+  }
+
+  // ---- Rotate preview (single upload) ------------------------------------
+
+  if (step === 'preview' && pendingFile) {
+    return (
+      <div className="mx-auto max-w-lg space-y-4">
+        <div className="surface p-4">
+          <p className="mb-0.5 text-xs font-medium text-[color:var(--muted)]">Sheet date</p>
+          <p className="text-sm font-semibold">{manualDate}</p>
+        </div>
+        <div className="surface p-2">
+          {previewUrl && (
+            <div className="flex items-center justify-center overflow-hidden rounded" style={{ minHeight: '40vh' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewUrl}
+                alt="Sheet preview"
+                className="max-h-[55vh] max-w-full rounded object-contain"
+                style={{ transform: `rotate(${singleRotation}deg)`, transition: 'transform 0.2s ease' }}
+              />
+            </div>
+          )}
+          <div className="mt-2 flex items-center justify-center gap-3 pb-1">
+            <button
+              type="button"
+              onClick={() => setSingleRotation((r) => (((r - 90 + 360) % 360) as 0 | 90 | 180 | 270))}
+              className="btn-secondary flex h-9 w-9 items-center justify-center text-lg"
+              title="Rotate left 90°"
+            >↺</button>
+            <span className="text-xs text-[color:var(--muted)]">
+              {singleRotation !== 0 ? `${singleRotation}° rotated` : 'Rotate if needed'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSingleRotation((r) => (((r + 90) % 360) as 0 | 90 | 180 | 270))}
+              className="btn-secondary flex h-9 w-9 items-center justify-center text-lg"
+              title="Rotate right 90°"
+            >↻</button>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button
+            className="btn-primary"
+            onClick={() => {
+              const f = pendingFile!
+              setPendingFile(null)
+              onFileChosen(f, undefined, shiftTypeHint ?? undefined, undefined, singleRotation)
+            }}
+          >
+            Scan
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              if (previewUrl) URL.revokeObjectURL(previewUrl)
+              setPreviewUrl(null)
+              setPendingFile(null)
+              setSingleRotation(0)
+              setStep('pick')
+            }}
+          >
+            Choose different
+          </button>
+        </div>
+        {error && (
+          <div className="rounded-md border border-rose-200 bg-rose-50/60 p-3 text-sm text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+            {error}
+          </div>
+        )}
       </div>
     )
   }
@@ -345,7 +610,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
       <div className="mx-auto max-w-lg space-y-4">
         {step === 'pick' ? (
           <>
-            <div className="surface p-4">
+            <div className="surface space-y-3 p-4">
               <label className="block text-sm">
                 <span className="mb-1 block text-xs font-medium text-[color:var(--muted)]">
                   Sheet date <span className="text-rose-500">*</span>
@@ -359,11 +624,37 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
                   aria-label="Date of the timesheet"
                 />
               </label>
-              <p className="mt-1.5 text-xs text-[color:var(--muted)]">
-                Enter the date on the paper sheet before scanning.
-              </p>
+              <div>
+                <p className="mb-1 text-xs font-medium text-[color:var(--muted)]">Shift type</p>
+                <div className="flex gap-2">
+                  {(['lunch', 'dinner'] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setShiftTypeHint((prev) => prev === s ? null : s)}
+                      className={shiftTypeHint === s ? 'btn-primary px-3 py-1.5 text-xs' : 'btn-secondary px-3 py-1.5 text-xs'}
+                    >
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                  <span className="self-center text-[10px] text-[color:var(--muted)]">
+                    {shiftTypeHint ? `(${shiftTypeHint} defaults applied)` : '(auto-detect)'}
+                  </span>
+                </div>
+              </div>
             </div>
-            <DropZone fileInputRef={fileInput} onFileChosen={onFileChosen} />
+            <DropZone
+              fileInputRef={fileInput}
+              onFileChosen={(f) => {
+                if (previewUrl) URL.revokeObjectURL(previewUrl)
+                setPreviewUrl(URL.createObjectURL(f))
+                setPendingFile(f)
+                setSingleRotation(0)
+                setError(null)
+                setStep('preview')
+              }}
+              onMultipleFilesChosen={onMultipleFilesChosen}
+            />
           </>
         ) : (
           <>
@@ -387,9 +678,16 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
 
   const selectedCount = candidates.filter((c) => c.include).length
   const flaggedCount = candidates.filter((c) => c.include && c.needs_review).length
+  const hasServers = candidates.some((c) => !isBusperson(c.role))
 
   return (
     <div className="space-y-4">
+      {batchTotal > 1 && (
+        <p className="text-sm text-[color:var(--muted)]">
+          Sheet {batchSaved + 1} of {batchTotal}
+          {batchQueue.length > 0 && ` · ${batchQueue.length} waiting`}
+        </p>
+      )}
       <div className="grid gap-6 md:grid-cols-[minmax(320px,2fr)_3fr]">
         {/* Photo (sticky on desktop) */}
         <div className="md:sticky md:top-6 md:self-start">
@@ -413,6 +711,8 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
             setSheetDate={setSheetDate}
             approvedBy={approvedBy}
             setApprovedBy={setApprovedBy}
+            shiftType={meta?.shift_type ?? null}
+            setShiftType={(v) => setMeta((m) => m ? { ...m, shift_type: v } : m)}
           />
 
           {flaggedCount > 0 && (
@@ -461,17 +761,20 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
                   <th className="px-2 py-2.5 font-normal">Brk</th>
                   <th className="px-2 py-2.5 font-normal text-center">Meal</th>
                   <th className="px-2 py-2.5 font-normal text-right">Rate</th>
+                  {hasServers && <th className="px-2 py-2.5 font-normal text-center">Pts</th>}
                   <th className="w-10 px-2 py-2.5 font-normal text-center" title="Notes">📝</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[color:var(--border)]">
-                {candidates.map((c) => (
+                {candidates.map((c, rowIdx) => (
                   <Row
                     key={c.id}
                     c={c}
+                    rowIdx={rowIdx}
                     employees={employees}
                     onPatch={(p) => patchCandidate(c.id, p)}
                     onEmployeeChange={(picked) => onEmployeeChange(c.id, picked)}
+                    showPoints={hasServers}
                   />
                 ))}
               </tbody>
@@ -512,17 +815,32 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
 function DropZone({
   fileInputRef,
   onFileChosen,
+  onMultipleFilesChosen,
 }: {
   fileInputRef: React.RefObject<HTMLInputElement | null>
   onFileChosen: (file: File) => void
+  onMultipleFilesChosen: (files: FileList) => void
 }) {
   const [dragOver, setDragOver] = useState(false)
+
+  function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    if (files.length === 1) {
+      if (files[0].type.startsWith('image/')) onFileChosen(files[0])
+    } else {
+      const images = Array.from(files).filter((f) => f.type.startsWith('image/'))
+      if (images.length > 0) {
+        const dt = new DataTransfer()
+        images.forEach((f) => dt.items.add(f))
+        onMultipleFilesChosen(dt.files)
+      }
+    }
+  }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
     setDragOver(false)
-    const file = e.dataTransfer.files[0]
-    if (file && file.type.startsWith('image/')) onFileChosen(file)
+    handleFiles(e.dataTransfer.files)
   }
 
   return (
@@ -536,7 +854,7 @@ function DropZone({
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click()
       }}
-      aria-label="Tap to photograph or drag and drop a sheet image"
+      aria-label="Tap to photograph or drag and drop sheet images"
       className={
         'surface flex min-h-64 cursor-pointer select-none flex-col items-center justify-center gap-5 p-10 text-center transition-[border-color,background-color] duration-200 ' +
         (dragOver
@@ -548,12 +866,9 @@ function DropZone({
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
+        multiple
         className="sr-only"
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          if (f) onFileChosen(f)
-        }}
+        onChange={(e) => handleFiles(e.target.files)}
       />
 
       {/* Camera icon */}
@@ -574,13 +889,13 @@ function DropZone({
 
       <div className="space-y-1.5">
         <p className="text-base font-semibold text-[color:var(--foreground)]">
-          {dragOver ? 'Drop to scan' : 'Add a sheet photo'}
+          {dragOver ? 'Drop to scan' : 'Add sheet photos'}
         </p>
         <p className="text-sm text-[color:var(--muted)]">
-          Tap to open your camera, or drag an image here
+          Tap to open your camera · select one or multiple sheets
         </p>
         <p className="text-xs text-[color:var(--muted)]">
-          JPG · PNG · HEIC · auto-compressed · takes 10–30 s
+          JPG · PNG · HEIC · auto-compressed · takes 10–30 s each
         </p>
       </div>
     </div>
@@ -658,13 +973,16 @@ function ShiftCard({
     flagged && (lowConf || c.inferred_from_bracket) && c.start_time === c.predicted_start_time && !startMissing
   const endSuspect =
     flagged && (lowConf || c.inferred_from_bracket) && c.end_time === c.predicted_end_time && !endMissing
+  const hours = computeShiftHours(c.start_time, c.end_time, c.break_minutes)
+  const hoursWarn = c.include && hours !== null && (hours > 7 || hours < 3)
 
   return (
     <div
       style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
       className={
         'surface space-y-3 p-4 animate-[fade-in-up_0.3s_ease_both] ' +
-        (!c.include ? 'opacity-50' : '')
+        (!c.include ? 'opacity-50' : '') +
+        (hoursWarn ? ' ring-1 ring-rose-400 dark:ring-rose-700' : '')
       }
     >
       {/* Checkbox + employee */}
@@ -737,14 +1055,19 @@ function ShiftCard({
       {/* Break / Meal / Rate */}
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <p className="mb-1 text-xs text-[color:var(--muted)]">Break (min)</p>
-          <input
-            type="number"
-            min="0"
-            className="input w-full text-right"
-            value={c.break_minutes}
-            onChange={(e) => onPatch({ break_minutes: Number(e.target.value) })}
-          />
+          <p className="mb-1 text-xs text-[color:var(--muted)]">Break</p>
+          <div className="flex gap-1">
+            {([0, 15, 30] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onPatch({ break_minutes: m })}
+                className={c.break_minutes === m ? 'btn-primary flex-1 py-1.5 text-xs' : 'btn-secondary flex-1 py-1.5 text-xs'}
+              >
+                {m === 0 ? 'None' : `${m}m`}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex flex-col items-center justify-end gap-1 pb-2">
           <p className="text-xs text-[color:var(--muted)]">Meal</p>
@@ -767,6 +1090,34 @@ function ShiftCard({
           />
         </div>
       </div>
+
+      {/* Hours warning */}
+      {hoursWarn && hours !== null && (
+        <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
+          ⚠ {hours.toFixed(1)}h — verify shift hours {hours > 7 ? '(unusually long)' : '(unusually short)'}
+        </p>
+      )}
+
+      {/* Alcohol points — servers only */}
+      {!isBusperson(c.role) && (
+        <div>
+          <p className="mb-1 text-xs text-[color:var(--muted)]">Drink points</p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onPatch({ drink_points: Math.max(0, c.drink_points - 1) })}
+              disabled={c.drink_points === 0}
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-[color:var(--border)] text-lg font-medium leading-none text-[color:var(--muted)] transition hover:bg-black/5 disabled:opacity-30 dark:hover:bg-white/5"
+            >−</button>
+            <span className="w-8 text-center text-base font-semibold tabular-nums">{c.drink_points}</span>
+            <button
+              type="button"
+              onClick={() => onPatch({ drink_points: c.drink_points + 1 })}
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-[color:var(--border)] text-lg font-medium leading-none text-[color:var(--muted)] transition hover:bg-black/5 dark:hover:bg-white/5"
+            >+</button>
+          </div>
+        </div>
+      )}
 
       {/* Notes — always visible in the card layout */}
       <div>
@@ -791,11 +1142,15 @@ function SheetHeader({
   setSheetDate,
   approvedBy,
   setApprovedBy,
+  shiftType,
+  setShiftType,
 }: {
   sheetDate: string
   setSheetDate: (v: string) => void
   approvedBy: string
   setApprovedBy: (v: string) => void
+  shiftType: 'lunch' | 'dinner' | 'both' | null
+  setShiftType: (v: 'lunch' | 'dinner') => void
 }) {
   return (
     <div className="surface p-4">
@@ -821,6 +1176,27 @@ function SheetHeader({
           />
         </label>
       </div>
+      <div className="mt-3">
+        <p className="mb-1 text-xs text-[color:var(--muted)]">Shift type</p>
+        <div className="flex gap-2">
+          {(['lunch', 'dinner'] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setShiftType(s)}
+              className={shiftType === s ? 'btn-primary px-3 py-1.5 text-xs' : 'btn-secondary px-3 py-1.5 text-xs'}
+            >
+              {s.charAt(0).toUpperCase() + s.slice(1)}
+            </button>
+          ))}
+          {shiftType === 'both' && (
+            <span className="self-center text-xs text-[color:var(--muted)]">both (detected)</span>
+          )}
+          {shiftType === null && (
+            <span className="self-center text-xs text-[color:var(--muted)]">not detected</span>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -845,14 +1221,18 @@ function MetaBox({ meta }: { meta: SheetMeta }) {
 
 function Row({
   c,
+  rowIdx,
   employees,
   onPatch,
   onEmployeeChange,
+  showPoints,
 }: {
   c: Candidate
+  rowIdx: number
   employees: Employee[]
   onPatch: (p: Partial<Candidate>) => void
   onEmployeeChange: (picked: { id: string | null; label: string }) => void
+  showPoints: boolean
 }) {
   const flagged = c.needs_review
   // Match the row-level threshold from onFileChosen so cells inside a
@@ -874,7 +1254,12 @@ function Row({
   const sectionSuspect =
     flagged && lowConf && c.section === c.predicted_section
 
-  const rowClass = !c.include ? 'opacity-50' : ''
+  const hours = computeShiftHours(c.start_time, c.end_time, c.break_minutes)
+  const hoursWarn = c.include && hours !== null && (hours > 7 || hours < 3)
+  const rowClass = [
+    !c.include ? 'opacity-50' : '',
+    hoursWarn ? 'bg-rose-50/40 dark:bg-rose-950/20' : '',
+  ].join(' ')
 
   return (
     <tr className={rowClass}>
@@ -918,6 +1303,8 @@ function Row({
           <TimeInput
             value={c.start_time}
             onChange={(v) => onPatch({ start_time: v })}
+            navRow={rowIdx}
+            navCol={1}
           />
           {startMissing && c.include && <ReviewHint label="missing — fill in" />}
           {startSuspect && (
@@ -933,6 +1320,8 @@ function Row({
           <TimeInput
             value={c.end_time}
             onChange={(v) => onPatch({ end_time: v })}
+            navRow={rowIdx}
+            navCol={2}
           />
           {endMissing && c.include && <ReviewHint label="missing — fill in" />}
           {endSuspect && (
@@ -944,13 +1333,23 @@ function Row({
         </CellShell>
       </td>
       <td className="px-2 py-2 align-top">
-        <input
-          type="number"
-          min="0"
-          className="input w-16 text-right"
-          value={c.break_minutes}
-          onChange={(e) => onPatch({ break_minutes: Number(e.target.value) })}
-        />
+        <div className="flex gap-1">
+          {([0, 15, 30] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => onPatch({ break_minutes: m })}
+              className={c.break_minutes === m ? 'btn-primary px-1.5 py-1 text-xs' : 'btn-secondary px-1.5 py-1 text-xs'}
+            >
+              {m === 0 ? 'None' : `${m}m`}
+            </button>
+          ))}
+        </div>
+        {hours !== null && (
+          <p className={`mt-0.5 text-[10px] tabular-nums ${hoursWarn ? 'font-medium text-rose-600 dark:text-rose-400' : 'text-[color:var(--muted)]'}`}>
+            {hours.toFixed(1)}h{hoursWarn ? ' ⚠' : ''}
+          </p>
+        )}
       </td>
       <td className="px-2 py-2 text-center align-top">
         <input
@@ -967,12 +1366,39 @@ function Row({
           className="input w-20 text-right"
           value={c.hourly_rate}
           onChange={(e) => onPatch({ hourly_rate: Number(e.target.value) })}
+          data-navrow={rowIdx}
+          data-navcol={3}
+          onKeyDown={(e) => navGridArrow(e, rowIdx, 3)}
         />
       </td>
+      {showPoints && (
+        <td className="px-2 py-2 text-center align-top">
+          {!isBusperson(c.role) ? (
+            <div className="flex items-center justify-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => onPatch({ drink_points: Math.max(0, c.drink_points - 1) })}
+                disabled={c.drink_points === 0}
+                className="flex h-6 w-6 items-center justify-center rounded border border-[color:var(--border)] text-sm text-[color:var(--muted)] transition hover:bg-black/5 disabled:opacity-30 dark:hover:bg-white/5"
+              >−</button>
+              <span className="w-6 text-center text-xs tabular-nums">{c.drink_points}</span>
+              <button
+                type="button"
+                onClick={() => onPatch({ drink_points: c.drink_points + 1 })}
+                className="flex h-6 w-6 items-center justify-center rounded border border-[color:var(--border)] text-sm text-[color:var(--muted)] transition hover:bg-black/5 dark:hover:bg-white/5"
+              >+</button>
+            </div>
+          ) : (
+            <span className="text-xs text-[color:var(--muted)]">—</span>
+          )}
+        </td>
+      )}
       <td className="px-2 py-2 align-top">
         <NotesCell
           value={c.notes}
           onChange={(v) => onPatch({ notes: v })}
+          navRow={rowIdx}
+          navCol={4}
         />
       </td>
     </tr>
@@ -988,9 +1414,13 @@ function Row({
 function NotesCell({
   value,
   onChange,
+  navRow,
+  navCol,
 }: {
   value: string
   onChange: (next: string) => void
+  navRow?: number
+  navCol?: number
 }) {
   const [open, setOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -1010,9 +1440,13 @@ function NotesCell({
         placeholder="Notes…"
         onChange={(e) => onChange(e.target.value)}
         onBlur={() => setOpen(false)}
+        data-navrow={navRow}
+        data-navcol={navCol}
         onKeyDown={(e) => {
           if (e.key === 'Escape' || e.key === 'Enter') {
             ;(e.target as HTMLInputElement).blur()
+          } else if (navRow !== undefined && navCol !== undefined) {
+            navGridArrow(e, navRow, navCol)
           }
         }}
       />
@@ -1087,6 +1521,224 @@ function ReviewHint({
  * One-line summary shown beside the Confirm button explaining why the row is
  * flagged. Keeps the per-row noise low while pointing at the column(s).
  */
+// ---- BatchStageView ---------------------------------------------------------
+
+function BatchStageView({
+  items,
+  onUpdate,
+  onRotate,
+  onConfirm,
+  onCancel,
+}: {
+  items: BatchItem[]
+  onUpdate: (id: string, patch: Partial<BatchItem>) => void
+  onRotate: (id: string, rotation: 0 | 90 | 180 | 270) => void
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const [lightboxId, setLightboxId] = useState<string | null>(null)
+  const lightboxItem = lightboxId ? items.find((b) => b.id === lightboxId) ?? null : null
+  const allAssigned = items.every((b) => b.date)
+  const autoCount = items.filter((b) => b.dateSource === 'auto').length
+
+  function rotateCW(r: number): 0 | 90 | 180 | 270 {
+    return ((r + 90) % 360) as 0 | 90 | 180 | 270
+  }
+  function rotateCCW(r: number): 0 | 90 | 180 | 270 {
+    return ((r - 90 + 360) % 360) as 0 | 90 | 180 | 270
+  }
+
+  return (
+    <>
+      {/* Full-screen lightbox */}
+      {lightboxItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+          onClick={() => setLightboxId(null)}
+        >
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setLightboxId(null)}
+            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/25"
+          >
+            ✕
+          </button>
+          {/* Rotate buttons inside lightbox */}
+          <div
+            className="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => onRotate(lightboxItem.id, rotateCCW(lightboxItem.rotation))}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg text-white hover:bg-white/30"
+              title="Rotate left"
+            >↺</button>
+            <button
+              type="button"
+              onClick={() => onRotate(lightboxItem.id, rotateCW(lightboxItem.rotation))}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg text-white hover:bg-white/30"
+              title="Rotate right"
+            >↻</button>
+          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxItem.previewUrl}
+            alt="Sheet"
+            style={{
+              transform: `rotate(${lightboxItem.rotation}deg)`,
+              transition: 'transform 0.2s ease',
+              maxHeight: lightboxItem.rotation === 0 || lightboxItem.rotation === 180 ? '85vh' : '85vw',
+              maxWidth: lightboxItem.rotation === 0 || lightboxItem.rotation === 180 ? '90vw' : '85vh',
+            }}
+            className="rounded object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
+      <div className="mx-auto max-w-lg space-y-4">
+        <div>
+          <p className="text-sm text-[color:var(--muted)]">
+            {items.length} photo{items.length !== 1 ? 's' : ''} selected — scanning in background. Verify the date and shift for each, then tap <strong>Scan</strong> to confirm.
+          </p>
+          {autoCount > 0 && (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              ⚠ {autoCount} date{autoCount !== 1 ? 's were' : ' was'} estimated from the file — open the photo to confirm.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          {items.map((item, idx) => (
+            <div key={item.id} className="surface flex gap-3 p-3">
+
+              {/* Thumbnail — tap to open full-size lightbox */}
+              <div className="flex shrink-0 flex-col items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setLightboxId(item.id)}
+                  className="group relative"
+                  title="Tap to view full size"
+                >
+                  <div className="relative h-20 w-20 overflow-hidden rounded">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={item.previewUrl}
+                      alt={`Sheet ${idx + 1}`}
+                      className="h-full w-full object-cover"
+                      style={{
+                        transform: `rotate(${item.rotation}deg)`,
+                        transition: 'transform 0.15s',
+                      }}
+                    />
+                  </div>
+                  <span className="absolute inset-0 flex items-end justify-center rounded pb-1 transition group-hover:bg-black/20">
+                    <span className="rounded bg-black/60 px-1 py-0.5 text-[9px] text-white opacity-0 transition group-hover:opacity-100">
+                      view
+                    </span>
+                  </span>
+                  {/* OCR status badge on thumbnail */}
+                  <span className="absolute left-0 top-0 m-0.5">
+                    {item.ocrStatus === 'processing' && (
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-black/60">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                      </span>
+                    )}
+                    {item.ocrStatus === 'done' && (
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[color:var(--tertiary)] text-[8px] text-white">✓</span>
+                    )}
+                    {item.ocrStatus === 'error' && (
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[8px] text-white" title={item.ocrError ?? ''}>✗</span>
+                    )}
+                  </span>
+                </button>
+                {/* Rotate buttons below thumbnail */}
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onRotate(item.id, rotateCCW(item.rotation))}
+                    className="flex h-6 w-6 items-center justify-center rounded text-sm text-[color:var(--muted)] hover:bg-black/5 dark:hover:bg-white/5"
+                    title="Rotate left"
+                  >↺</button>
+                  <button
+                    type="button"
+                    onClick={() => onRotate(item.id, rotateCW(item.rotation))}
+                    className="flex h-6 w-6 items-center justify-center rounded text-sm text-[color:var(--muted)] hover:bg-black/5 dark:hover:bg-white/5"
+                    title="Rotate right"
+                  >↻</button>
+                </div>
+              </div>
+
+              <div className="flex-1 space-y-2">
+                <p className="text-xs font-medium text-[color:var(--muted)]">Photo {idx + 1}</p>
+
+                <label className="block text-xs">
+                  <span className="mb-0.5 flex items-center gap-1.5 text-[color:var(--muted)]">
+                    Date
+                    {item.dateSource === 'auto' && (
+                      <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+                        estimated
+                      </span>
+                    )}
+                    {item.dateSource === 'manual' && item.date && (
+                      <span className="rounded bg-[color:var(--tertiary-tint)] px-1 py-0.5 text-[9px] font-medium text-[color:var(--tertiary)]">
+                        confirmed
+                      </span>
+                    )}
+                  </span>
+                  <input
+                    type="date"
+                    value={item.date}
+                    onChange={(e) =>
+                      onUpdate(item.id, { date: e.target.value, dateSource: 'manual' })
+                    }
+                    className="input"
+                  />
+                </label>
+
+                <div>
+                  <p className="mb-0.5 text-xs text-[color:var(--muted)]">Shift</p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onUpdate(item.id, { shiftType: 'lunch' })}
+                      className={item.shiftType === 'lunch' ? 'btn-primary px-3 py-1 text-xs' : 'btn-secondary px-3 py-1 text-xs'}
+                    >
+                      Lunch
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdate(item.id, { shiftType: 'dinner' })}
+                      className={item.shiftType === 'dinner' ? 'btn-primary px-3 py-1 text-xs' : 'btn-secondary px-3 py-1 text-xs'}
+                    >
+                      Dinner
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onConfirm}
+            disabled={!allAssigned}
+            className="btn-primary disabled:opacity-50"
+          >
+            Scan {items.length} sheet{items.length !== 1 ? 's' : ''}
+          </button>
+          <button onClick={onCancel} className="btn-secondary">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function summarizeReviewReason({
   lowConf,
   c,
@@ -1117,12 +1769,40 @@ function summarizeReviewReason({
   return `verify: ${parts.join(', ')}`
 }
 
+/**
+ * Move focus to an adjacent cell in the scan review table.
+ * ArrowUp/Down navigates between rows in the same column.
+ * ArrowLeft/Right navigates between columns in the same row (Start→End→Rate→Notes).
+ */
+function navGridArrow(
+  e: React.KeyboardEvent<HTMLInputElement>,
+  rowIdx: number,
+  colIdx: number
+) {
+  const isVert = e.key === 'ArrowUp' || e.key === 'ArrowDown'
+  const isHoriz = e.key === 'ArrowLeft' || e.key === 'ArrowRight'
+  if (!isVert && !isHoriz) return
+  e.preventDefault()
+  const table = (e.target as HTMLElement).closest('table')
+  if (!table) return
+  const targetRow = e.key === 'ArrowDown' ? rowIdx + 1 : e.key === 'ArrowUp' ? rowIdx - 1 : rowIdx
+  const targetCol = e.key === 'ArrowRight' ? colIdx + 1 : e.key === 'ArrowLeft' ? colIdx - 1 : colIdx
+  const el = table.querySelector<HTMLElement>(
+    `[data-navrow="${targetRow}"][data-navcol="${targetCol}"]`
+  )
+  el?.focus()
+}
+
 function TimeInput({
   value,
   onChange,
+  navRow,
+  navCol,
 }: {
   value: string
   onChange: (v: string) => void
+  navRow?: number
+  navCol?: number
 }) {
   // Single text input. User types 12-hour with AM/PM ("8:30 PM", "830pm",
   // "8 am", "16:30"); blur parses to canonical 24-hour "HH:MM" for storage.
@@ -1155,8 +1835,14 @@ function TimeInput({
       value={text}
       onChange={(e) => setText(e.target.value)}
       onBlur={commit}
+      data-navrow={navRow}
+      data-navcol={navCol}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Enter') {
+          ;(e.target as HTMLInputElement).blur()
+        } else if (navRow !== undefined && navCol !== undefined) {
+          navGridArrow(e, navRow, navCol)
+        }
       }}
       placeholder="8:30 PM"
     />
@@ -1177,11 +1863,46 @@ function formatTime12(hhmm: string): string {
 }
 
 /**
+ * Try to infer the sheet date from the file before OCR runs.
+ * 1. Parse YYYYMMDD out of the filename (Android camera: IMG_20260601_143022.jpg).
+ * 2. Fall back to the file's last-modified timestamp.
+ */
+function extractDateFromFile(file: File): string {
+  const m = /(\d{4})(\d{2})(\d{2})/.exec(file.name)
+  if (m) {
+    const candidate = `${m[1]}-${m[2]}-${m[3]}`
+    const dt = new Date(candidate + 'T00:00:00')
+    if (!isNaN(dt.getTime()) && dt.getFullYear() >= 2020 && dt.getFullYear() <= 2035) {
+      return candidate
+    }
+  }
+  const dt = new Date(file.lastModified)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+
+/** Hours worked (start → end minus break). Handles midnight crossing. Returns null if times missing. */
+function computeShiftHours(startTime: string, endTime: string, breakMinutes: number): number | null {
+  if (!startTime || !endTime) return null
+  const toMins = (t: string) => {
+    const [h, m] = t.split(':').map(Number)
+    return h * 60 + (m || 0)
+  }
+  let start = toMins(startTime)
+  let end = toMins(endTime)
+  if (end <= start) end += 24 * 60
+  return Math.max(0, end - start - breakMinutes) / 60
+}
+
+/**
  * Resize + re-encode to JPEG so the upload stays under Vercel's 4.5 MB
  * serverless payload limit. Caps the longest side at 2048 px, which matches
  * what OpenAI's vision API processes internally — no accuracy loss.
  */
-async function compressImage(file: File, maxSide = 2048, quality = 0.85): Promise<Blob> {
+function isBusperson(role: string | null | undefined): boolean {
+  return /bus/i.test(role ?? '')
+}
+
+async function compressImage(file: File, maxSide = 2048, quality = 0.85, rotation = 0): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     const url = URL.createObjectURL(file)
@@ -1191,9 +1912,13 @@ async function compressImage(file: File, maxSide = 2048, quality = 0.85): Promis
       const w = Math.round(img.width * scale)
       const h = Math.round(img.height * scale)
       const canvas = document.createElement('canvas')
-      canvas.width = w
-      canvas.height = h
-      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+      const swapped = rotation === 90 || rotation === 270
+      canvas.width = swapped ? h : w
+      canvas.height = swapped ? w : h
+      const ctx = canvas.getContext('2d')!
+      ctx.translate(canvas.width / 2, canvas.height / 2)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.drawImage(img, -w / 2, -h / 2, w, h)
       canvas.toBlob(
         (blob) => (blob ? resolve(blob) : reject(new Error('Image compression failed'))),
         'image/jpeg',
@@ -1260,11 +1985,14 @@ function parseTime12(input: string): string | null {
     if (h > 12) return null
     if (h !== 12) h += 12
   } else {
-    // No period given. Restaurant default: hours 1-11 → PM. 0/12 stay as-is
-    // (12 reads as noon; 0 as midnight). Hours 13-23 are already 24-hour.
-    if (h >= 1 && h <= 11) h += 12
+    // Restaurant default: 10 and 11 are AM (lunch starts); 1-9 and 12 are PM;
+    // 0 is midnight; 13-23 are already 24-hour.
+    if (h >= 1 && h <= 9) h += 12
   }
   if (h > 23) return null
+
+  // Round minutes DOWN to nearest 15-minute mark (00, 15, 30, 45).
+  min = Math.floor(min / 15) * 15
 
   return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
 }

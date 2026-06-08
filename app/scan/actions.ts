@@ -29,6 +29,12 @@ const ApproveInput = z.object({
   rows: z.array(ReviewedShift).min(1, 'Add at least one shift'),
   raw_ocr: z.unknown().optional(),
   scan_image_path: z.string().trim().max(300).nullable().optional(),
+  shift_type: z.enum(['lunch', 'dinner', 'both']).nullable().optional(),
+  alcohol_points: z.array(z.object({
+    employee_id: z.string().uuid().nullable(),
+    employee_name: z.string().trim().min(1).max(120),
+    drink_points: z.coerce.number().int().min(1),
+  })).optional(),
 })
 
 export type ApproveInputType = z.input<typeof ApproveInput>
@@ -66,28 +72,47 @@ export async function approveScannedSheet(input: ApproveInputType): Promise<Appr
       .limit(1)
       .maybeSingle()
 
-    const { data: created, error: createErr } = await supabase
+    // Try to save shift_type; gracefully degrade if the column doesn't exist yet
+    // (run migration 0004_daily_sheet_shift_type.sql to enable this column).
+    let sheetInsert: Record<string, unknown> = {
+      sheet_date: data.sheet_date,
+      pay_period_id: period?.id ?? null,
+      status: 'reviewing',
+      approved_by: data.approved_by ?? null,
+      scan_image_path: data.scan_image_path ?? null,
+      shift_type: data.shift_type ?? null,
+    }
+    let { data: created, error: createErr } = await supabase
       .from('daily_sheets')
-      .insert({
-        sheet_date: data.sheet_date,
-        pay_period_id: period?.id ?? null,
-        status: 'reviewing',
-        approved_by: data.approved_by ?? null,
-        scan_image_path: data.scan_image_path ?? null,
-      })
+      .insert(sheetInsert)
       .select('id')
       .single()
+    if (createErr && /shift_type/i.test(createErr.message)) {
+      const { shift_type: _st, ...withoutType } = sheetInsert
+      const retry = await supabase.from('daily_sheets').insert(withoutType).select('id').single()
+      if (retry.error) throw new Error(retry.error.message)
+      created = retry.data
+      createErr = null
+    }
     if (createErr) throw new Error(createErr.message)
-    dailySheetId = created.id
+    dailySheetId = created!.id
   } else {
     reusedExistingSheet = true
-    if (data.scan_image_path) {
-      // Reused sheet: attach the image if the existing row doesn't already have one.
-      await supabase
-        .from('daily_sheets')
-        .update({ scan_image_path: data.scan_image_path })
-        .eq('id', dailySheetId)
-        .is('scan_image_path', null)
+    // Update image and shift_type on the reused sheet as needed.
+    const updates: Record<string, unknown> = {}
+    if (data.scan_image_path) updates.scan_image_path = data.scan_image_path
+    if (data.shift_type) {
+      // If a second scan of the same date has a different type, mark as 'both'.
+      const { data: existing } = await supabase
+        .from('daily_sheets').select('shift_type, scan_image_path').eq('id', dailySheetId!).maybeSingle()
+      const curType = (existing as { shift_type?: string | null } | null)?.shift_type ?? null
+      updates.shift_type = !curType || curType === data.shift_type ? data.shift_type : 'both'
+      if (data.scan_image_path && (existing as { scan_image_path?: string | null } | null)?.scan_image_path) {
+        delete updates.scan_image_path // existing image already set — don't overwrite
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      await supabase.from('daily_sheets').update(updates).eq('id', dailySheetId!).catch(() => {})
     }
   }
 
@@ -128,6 +153,18 @@ export async function approveScannedSheet(input: ApproveInputType): Promise<Appr
     insertErr = retry.error
   }
   if (insertErr) throw new Error(insertErr.message)
+
+  // Save alcohol points entered during the scan review step (servers only).
+  if (data.alcohol_points && data.alcohol_points.length > 0) {
+    await supabase.from('alcohol_sales').insert(
+      data.alcohol_points.map((p) => ({
+        daily_sheet_id: dailySheetId!,
+        employee_id: p.employee_id,
+        employee_name_snapshot: p.employee_name,
+        drink_points: p.drink_points,
+      }))
+    ).catch(() => {})
+  }
 
   // Archive raw OCR for audit / re-review.
   if (data.raw_ocr !== undefined) {

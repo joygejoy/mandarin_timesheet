@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { extractEmployeesFromImage, isOpenAIConfigured, OpenAINotConfiguredError } from '@/lib/openai'
 import { pdfToText } from '@/lib/parsers/pdf'
-import { xlsxToText } from '@/lib/parsers/excel'
+import { xlsxToRoledEmployees } from '@/lib/parsers/excel'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -37,7 +37,26 @@ export async function POST(request: NextRequest) {
 
   const kind = classifyFile(file)
 
-  if (kind === 'text' || kind === 'pdf' || kind === 'excel') {
+  // Excel files get role-aware parsing: first table = Server, second = Busperson.
+  if (kind === 'excel') {
+    let employees: ReturnType<typeof xlsxToRoledEmployees> = []
+    try {
+      const buf = Buffer.from(await file.arrayBuffer())
+      employees = xlsxToRoledEmployees(buf)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to read Excel file'
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+    if (employees.length === 0) {
+      return NextResponse.json(
+        { error: 'Excel file was readable but no employee names were found. Make sure the first column is the employee number and the second is the name.' },
+        { status: 400 }
+      )
+    }
+    return NextResponse.json({ employees, source: kind })
+  }
+
+  if (kind === 'text' || kind === 'pdf') {
     let text = ''
     try {
       if (kind === 'text') {
@@ -45,9 +64,6 @@ export async function POST(request: NextRequest) {
       } else if (kind === 'pdf') {
         const buf = Buffer.from(await file.arrayBuffer())
         text = await pdfToText(buf)
-      } else if (kind === 'excel') {
-        const buf = Buffer.from(await file.arrayBuffer())
-        text = xlsxToText(buf)
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to read file'
@@ -61,8 +77,6 @@ export async function POST(request: NextRequest) {
           error:
             kind === 'pdf'
               ? 'PDF was readable but no employee names were found. The roster might be in a layout the parser missed — try exporting to CSV.'
-              : kind === 'excel'
-              ? 'Excel file was readable but no employee names were found. Make sure the first column is the name.'
               : 'No employee names found in this file. Expected one name per line, or a CSV with a name column.',
         },
         { status: 400 }

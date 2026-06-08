@@ -27,11 +27,12 @@ export function EmployeeForm({ action, employee, submitLabel }: Props) {
             autoComplete="off"
           />
         </Field>
-        <Field label="Employee #">
+        <Field label="Employee #" required>
           <input
             name="employee_number"
             type="number"
             min="1"
+            required
             defaultValue={e?.employee_number ?? ''}
             className="input tabular-nums"
             placeholder="e.g. 758"
@@ -40,7 +41,14 @@ export function EmployeeForm({ action, employee, submitLabel }: Props) {
       </div>
 
       <Field label="Role">
-        <input name="role" defaultValue={e?.role ?? ''} className="input" />
+        <select name="role" defaultValue={e?.role ?? ''} className="input">
+          <option value="">—</option>
+          <option value="Server">Server</option>
+          <option value="Busperson">Busperson</option>
+          {e?.role && e.role !== 'Server' && e.role !== 'Busperson' && (
+            <option value={e.role}>{e.role}</option>
+          )}
+        </select>
       </Field>
 
       <Field label="Hourly rate" required>
@@ -69,26 +77,15 @@ export function EmployeeForm({ action, employee, submitLabel }: Props) {
         </p>
       </Field>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Age">
-          <input
-            name="age"
-            type="number"
-            min="0"
-            defaultValue={e?.age ?? ''}
-            className="input"
-          />
-        </Field>
-        <Field label="Default break (min)">
-          <input
-            name="default_break_minutes"
-            type="number"
-            min="0"
-            defaultValue={e?.default_break_minutes ?? 0}
-            className="input"
-          />
-        </Field>
-      </div>
+      <Field label="Age">
+        <input
+          name="age"
+          type="number"
+          min="0"
+          defaultValue={e?.age ?? ''}
+          className="input"
+        />
+      </Field>
 
       <label className="flex items-center gap-2 text-sm">
         <input

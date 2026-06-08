@@ -15,9 +15,6 @@ type Candidate = {
   employee_number: string       // string so empty input stays empty
   role: string
   hourly_rate: number
-  age: string                   // string so empty input stays empty
-  default_break_minutes: number
-  default_meal_provided: boolean
   confidence: number
   source_note: string | null
   duplicateOfExisting: boolean
@@ -77,9 +74,6 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
         employee_number: e.employee_number != null ? String(e.employee_number) : '',
         role: e.role?.trim() ?? '',
         hourly_rate: DEFAULT_WAGE_RATE,
-        age: '',
-        default_break_minutes: 0,
-        default_meal_provided: false,
         confidence: e.confidence,
         source_note: e.source_note,
         duplicateOfExisting: existingKeys.has(normalizeEmployeeName(e.name)),
@@ -100,9 +94,6 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
         employee_number: c.employee_number === '' ? undefined : Number(c.employee_number),
         role: c.role.trim() || undefined,
         hourly_rate: c.hourly_rate,
-        age: c.age === '' ? undefined : Number(c.age),
-        default_break_minutes: c.default_break_minutes,
-        default_meal_provided: c.default_meal_provided,
       }))
     if (rows.length === 0) {
       setError('Pick at least one row to save.')
@@ -266,9 +257,6 @@ function CandidateTable({
             <th className="px-3 py-2.5 font-normal">Name</th>
             <th className="px-3 py-2.5 font-normal">Role</th>
             <th className="px-3 py-2.5 font-normal">Rate</th>
-            <th className="px-3 py-2.5 font-normal">Age</th>
-            <th className="px-3 py-2.5 font-normal">Break</th>
-            <th className="px-3 py-2.5 font-normal">Meal</th>
             <th className="px-3 py-2.5 font-normal">Source</th>
           </tr>
         </thead>
@@ -315,12 +303,15 @@ function CandidateTable({
                   )}
                 </td>
                 <td className="px-3 py-2 align-top">
-                  <input
+                  <select
                     className="input"
                     value={c.role}
-                    placeholder="Server"
                     onChange={(e) => onChange(c.id, { role: e.target.value })}
-                  />
+                  >
+                    <option value="">—</option>
+                    <option value="Server">Server</option>
+                    <option value="Busperson">Busperson</option>
+                  </select>
                 </td>
                 <td className="px-3 py-2 align-top">
                   <div className="flex flex-col gap-1">
@@ -338,31 +329,6 @@ function CandidateTable({
                       onChange={(e) => onChange(c.id, { hourly_rate: Number(e.target.value) })}
                     />
                   </div>
-                </td>
-                <td className="px-3 py-2 align-top">
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    value={c.age}
-                    onChange={(e) => onChange(c.id, { age: e.target.value })}
-                  />
-                </td>
-                <td className="px-3 py-2 align-top">
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    value={c.default_break_minutes}
-                    onChange={(e) => onChange(c.id, { default_break_minutes: Number(e.target.value) })}
-                  />
-                </td>
-                <td className="px-3 py-2 align-top text-center">
-                  <input
-                    type="checkbox"
-                    checked={c.default_meal_provided}
-                    onChange={(e) => onChange(c.id, { default_meal_provided: e.target.checked })}
-                  />
                 </td>
                 <td className="px-3 py-2 align-top text-xs text-[color:var(--muted)]">{c.source_note ?? '—'}</td>
               </tr>

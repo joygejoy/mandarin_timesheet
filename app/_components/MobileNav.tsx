@@ -5,10 +5,11 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { LogoutButton } from './LogoutButton'
 
-const NAV: { href: string; label: string }[] = [
-  { href: '/', label: 'Dashboard' },
+const NAV: { href: string; label: string; exact?: boolean }[] = [
+  { href: '/', label: 'Dashboard', exact: true },
   { href: '/scan', label: 'Scan sheet' },
-  { href: '/shifts', label: 'Daily shifts' },
+  { href: '/shifts', label: 'Daily shifts', exact: true },
+  { href: '/shifts/week', label: 'Weekly summary' },
   { href: '/alcohol', label: 'Alcohol sales' },
   { href: '/payroll', label: 'Payroll' },
   { href: '/employees', label: 'Employees' },
@@ -80,8 +81,9 @@ export function MobileNav() {
               </button>
             </div>
             {NAV.map((item) => {
-              const active =
-                item.href === '/' ? pathname === '/' : pathname?.startsWith(item.href)
+              const active = item.exact
+                ? pathname === item.href
+                : pathname?.startsWith(item.href)
               return (
                 <Link
                   key={item.href}

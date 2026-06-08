@@ -9,6 +9,7 @@ export type SheetRow = {
   id: string
   sheet_date: string
   status: DailySheet['status']
+  shift_type: DailySheet['shift_type']
   pay_period_id: string | null
   scan_image_path: string | null
   shift_count: number
@@ -147,6 +148,11 @@ function SheetTable({ rows }: { rows: SheetRow[] }) {
             >
               <td className="px-3 py-2.5 font-medium">
                 {fmtDateLong(s.sheet_date)}
+                {s.shift_type && (
+                  <span className="ml-2 inline-flex items-center rounded-full bg-[color:var(--accent-tint)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--accent)]">
+                    {s.shift_type.charAt(0).toUpperCase() + s.shift_type.slice(1)}
+                  </span>
+                )}
                 {s.scan_image_path && (
                   <span
                     className="ml-2 inline-flex items-center gap-1 text-[11px] text-[color:var(--muted)]"

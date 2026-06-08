@@ -118,8 +118,13 @@ function Row({
 
   if (readOnly) {
     return (
-      <tr className="bg-emerald-50/30 dark:bg-emerald-950/10">
-        <td className="px-3 py-2">{s.employee_name_snapshot}</td>
+      <tr className={s.needs_review ? 'bg-amber-50/60 dark:bg-amber-950/20' : 'bg-emerald-50/30 dark:bg-emerald-950/10'}>
+        <td className="px-3 py-2">
+          {s.employee_name_snapshot}
+          {s.needs_review && (
+            <p className="mt-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">⚠ verify OCR</p>
+          )}
+        </td>
         <td className="px-3 py-2">{s.section ?? '—'}</td>
         <td className="px-3 py-2 tabular-nums">{s.start_time ?? '—'}</td>
         <td className="px-3 py-2 tabular-nums">{s.end_time ?? '—'}</td>
@@ -146,7 +151,7 @@ function Row({
   }
 
   return (
-    <tr>
+    <tr className={s.needs_review ? 'bg-amber-50/40 dark:bg-amber-950/10' : ''}>
       <td className="px-3 py-2">
         <EmployeeCombobox
           options={employees.map((e) => ({
@@ -163,15 +168,25 @@ function Row({
         {!s.employee_id && (
           <p className="mt-1 text-[10px] text-[color:var(--muted)]">unlinked from roster</p>
         )}
+        {s.needs_review && (
+          <p className="mt-1 text-[10px] font-medium text-amber-700 dark:text-amber-400">⚠ verify OCR</p>
+        )}
       </td>
       <td className="px-3 py-2">
-        <input
+        <select
           className="input w-16"
           value={s.section ?? ''}
-          maxLength={20}
-          onChange={(e) => setField('section', e.target.value || null)}
-          onBlur={() => commit({ section: s.section ?? null })}
-        />
+          onChange={(e) => {
+            const v = e.target.value || null
+            setField('section', v)
+            commit({ section: v })
+          }}
+        >
+          <option value="">—</option>
+          {['A', 'B', 'C', 'D', 'E', 'F'].map((l) => (
+            <option key={l} value={l}>{l}</option>
+          ))}
+        </select>
       </td>
       <td className="px-3 py-2">
         <input
@@ -260,26 +275,48 @@ function Row({
 function DeleteShiftButton({
   id,
   sheetId,
-  name,
 }: {
   id: string
   sheetId: string
   name: string
 }) {
+  const [confirming, setConfirming] = useState(false)
   const [pending, startTransition] = useTransition()
+
+  if (confirming) {
+    return (
+      <span className="flex items-center justify-end gap-1">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() =>
+            startTransition(async () => {
+              await deleteShift(id, sheetId)
+            })
+          }
+          className="text-xs font-medium text-rose-600 hover:text-rose-800 disabled:opacity-50 dark:text-rose-400"
+        >
+          {pending ? '…' : 'Delete'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          disabled={pending}
+          className="text-xs text-[color:var(--muted)] hover:text-[color:var(--foreground)]"
+        >
+          Cancel
+        </button>
+      </span>
+    )
+  }
+
   return (
     <button
       type="button"
-      disabled={pending}
-      onClick={() => {
-        if (!confirm(`Delete this shift for ${name}?`)) return
-        startTransition(async () => {
-          await deleteShift(id, sheetId)
-        })
-      }}
-      className="text-xs text-rose-600 hover:text-rose-800 disabled:opacity-50 dark:text-rose-400"
+      onClick={() => setConfirming(true)}
+      className="text-xs text-rose-600 hover:text-rose-800 dark:text-rose-400"
     >
-      {pending ? '…' : 'Delete'}
+      Delete
     </button>
   )
 }

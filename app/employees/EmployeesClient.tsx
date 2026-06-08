@@ -15,8 +15,6 @@ import { InlineWageEditor } from './InlineWageEditor'
 import { ONTARIO_WAGE_PRESETS } from '@/lib/wages'
 import type { Employee } from '@/lib/types/db'
 
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
-const NON_ALPHA = '#'
 const PAGE_SIZE = 10
 
 type SortOrder = 'name' | 'num-asc' | 'num-desc'
@@ -75,18 +73,6 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
     if (page > totalPages) setPage(totalPages)
   }, [page, totalPages])
 
-  // First-occurrence-of-letter mapping is computed across the FULL filtered
-  // list so the alphabet rail can jump to the correct page even when that
-  // letter isn't on the current one.
-  const letterToPage = useMemo(() => {
-    const m = new Map<string, number>()
-    sorted.forEach((e, i) => {
-      const ch = letterFor(e.full_name)
-      if (!m.has(ch)) m.set(ch, Math.floor(i / PAGE_SIZE) + 1)
-    })
-    return m
-  }, [sorted])
-
   const pageStart = (page - 1) * PAGE_SIZE
   const pageRows = sorted.slice(pageStart, pageStart + PAGE_SIZE)
 
@@ -114,11 +100,6 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
   function exitSelectMode() {
     setSelectMode(false)
     clearSelection()
-  }
-
-  function jumpToLetter(letter: string) {
-    const target = letterToPage.get(letter)
-    if (target) setPage(target)
   }
 
   function onDeleteSelected() {
@@ -232,27 +213,18 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
         </div>
       )}
 
-      <div className="relative">
-        <div className="surface overflow-hidden">
-          {sorted.length === 0 ? (
-            <div className="p-10 text-center text-sm text-[color:var(--muted)]">
-              No matches for &quot;{query}&quot;.
-            </div>
-          ) : (
-            <PageList
-              rows={pageRows}
-              startIndex={pageStart + 1}
-              selectMode={selectMode}
-              selected={selected}
-              onToggle={toggleOne}
-            />
-          )}
-        </div>
-
-        {sortOrder === 'name' && (
-          <AlphabetJump
-            lettersWithRows={new Set(letterToPage.keys())}
-            onJump={jumpToLetter}
+      <div className="surface overflow-hidden">
+        {sorted.length === 0 ? (
+          <div className="p-10 text-center text-sm text-[color:var(--muted)]">
+            No matches for &quot;{query}&quot;.
+          </div>
+        ) : (
+          <PageList
+            rows={pageRows}
+            startIndex={pageStart + 1}
+            selectMode={selectMode}
+            selected={selected}
+            onToggle={toggleOne}
           />
         )}
       </div>
@@ -535,7 +507,6 @@ function NameBlock({ employee }: { employee: Employee }) {
       <div className="mt-0.5 truncate text-xs text-[color:var(--muted)]">
         {[
           e.role || 'No role',
-          `${e.default_break_minutes}m break`,
           e.default_meal_provided ? 'meal' : null,
         ]
           .filter(Boolean)
@@ -671,44 +642,3 @@ function Pagination({
   )
 }
 
-function AlphabetJump({
-  lettersWithRows,
-  onJump,
-}: {
-  lettersWithRows: Set<string>
-  onJump: (letter: string) => void
-}) {
-  const all = [...ALPHABET, NON_ALPHA]
-  return (
-    <nav
-      aria-label="Jump to letter"
-      className="pointer-events-none absolute right-1 top-2 hidden flex-col items-center gap-0.5 lg:flex"
-    >
-      {all.map((l) => {
-        const active = lettersWithRows.has(l)
-        return (
-          <button
-            key={l}
-            type="button"
-            tabIndex={active ? 0 : -1}
-            onClick={() => active && onJump(l)}
-            className={`pointer-events-auto rounded px-1 text-[10px] leading-tight transition ${
-              active
-                ? 'text-[color:var(--muted)] hover:text-[color:var(--foreground)]'
-                : 'text-[color:var(--border-strong)]'
-            }`}
-          >
-            {l}
-          </button>
-        )
-      })}
-    </nav>
-  )
-}
-
-// ---- helpers ----
-
-function letterFor(name: string): string {
-  const ch = (name.trim()[0] ?? '').toUpperCase()
-  return /[A-Z]/.test(ch) ? ch : NON_ALPHA
-}

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { getScanSignedUrl } from '@/lib/storage'
 import { summarizeDay } from '@/lib/payroll'
 import { addShift, setDailySheetStatus } from '../actions'
 import { ShiftRows } from './ShiftRows'
@@ -75,6 +76,12 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
 
   const summary = summarizeDay(shifts)
 
+  // Pre-generate signed URL server-side so the photo panel opens instantly
+  // without an extra API round-trip (signed URLs are valid for 1 hour).
+  const scanUrl = sheet.scan_image_path
+    ? await getScanSignedUrl(sheet.scan_image_path)
+    : null
+
   return (
     <div className="mx-auto max-w-6xl">
       <header className="pb-6">
@@ -84,6 +91,13 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
         <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
           <div>
             <ChangeDateButton sheetId={sheet.id} currentDate={sheet.sheet_date} />
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              {sheet.shift_type && (
+                <span className="inline-flex items-center rounded-full bg-[color:var(--accent-tint)] px-2.5 py-0.5 text-xs font-medium text-[color:var(--accent)]">
+                  {sheet.shift_type.charAt(0).toUpperCase() + sheet.shift_type.slice(1)}
+                </span>
+              )}
+            </div>
             <p className="mt-1 text-sm text-[color:var(--muted)]">
               <span className="font-medium text-[color:var(--foreground)]">{sheet.status}</span>
               {period ? (
@@ -109,9 +123,9 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
 
       <SummaryCards summary={summary} />
 
-      {sheet.scan_image_path && (
+      {scanUrl && (
         <section className="mt-6">
-          <ScanPhotoPanel sheetId={sheet.id} />
+          <ScanPhotoPanel url={scanUrl} />
         </section>
       )}
 

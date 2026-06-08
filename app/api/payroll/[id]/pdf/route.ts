@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { summarizePayPeriod } from '@/lib/payroll'
 import { renderPayrollPdf } from '@/lib/pdf-render'
+import { buildEnrichedRows } from '@/lib/payroll-export'
 import type { PayPeriod, DailySheet, Shift, AlcoholSale } from '@/lib/types/db'
 
 // pdfkit needs Node APIs (Buffer, streams) — opt out of the Edge runtime.
@@ -10,9 +11,17 @@ export const dynamic = 'force-dynamic'
 
 type SheetWithChildren = DailySheet & { shifts: Shift[]; alcohol_sales: AlcoholSale[] }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id]/pdf'>) {
   const { id } = await ctx.params
-  const supabase = getSupabaseAdmin()
+  if (!UUID_RE.test(id)) return new Response('Invalid id', { status: 400 })
+  let supabase: ReturnType<typeof getSupabaseAdmin>
+  try {
+    supabase = getSupabaseAdmin()
+  } catch (err) {
+    return new Response(err instanceof Error ? err.message : 'Supabase not configured', { status: 503 })
+  }
 
   // Mirror the CSV route exactly: only approved sheets, ordered by date.
   const [{ data: periodRow, error: periodErr }, { data: sheetsRow, error: sheetsErr }] =
@@ -40,9 +49,11 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
     }))
   )
 
+  const rows = await buildEnrichedRows(summary, supabase)
+
   let pdf: Buffer
   try {
-    pdf = await renderPayrollPdf(period, summary)
+    pdf = await renderPayrollPdf(period, summary, rows)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to render PDF'
     return new Response(message, { status: 500 })

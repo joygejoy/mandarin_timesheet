@@ -8,7 +8,7 @@ import { ONTARIO_WAGE_PRESETS } from '@/lib/wages'
 
 const EmployeeInput = z.object({
   full_name: z.string().trim().min(1, 'Name required').max(120),
-  employee_number: z.coerce.number().int().min(1).optional().or(z.literal('')),
+  employee_number: z.coerce.number().int().min(1),
   role: z.string().trim().max(60).optional().or(z.literal('')),
   hourly_rate: z.coerce.number().min(0).max(999),
   age: z.coerce.number().int().min(0).max(120).optional().or(z.literal('')),

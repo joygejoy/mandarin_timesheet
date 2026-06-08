@@ -8,8 +8,13 @@ import 'server-only'
 // `brfs`, which inlines the AFM data as base64 — no runtime FS lookups.
 import PDFDocumentCtor from 'pdfkit/js/pdfkit.standalone'
 
-import type { BiweeklySummary } from '@/lib/payroll'
+import type { BiweeklySummary, BiweeklyRow } from '@/lib/payroll'
 import type { PayPeriod } from '@/lib/types/db'
+
+export type EnrichedPayrollRow = BiweeklyRow & {
+  employee_number: number | null
+  department: string | null
+}
 
 // pdfkit's `.d.ts` exports the document type as `export = doc`, where
 // `doc: PDFKit.PDFDocument` describes both the instance shape AND a `new()`
@@ -24,7 +29,8 @@ type PDFDocumentClass = typeof PDFDocumentCtor
  */
 export function renderPayrollPdf(
   period: PayPeriod,
-  summary: BiweeklySummary
+  summary: BiweeklySummary,
+  rows: EnrichedPayrollRow[]
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
@@ -45,7 +51,7 @@ export function renderPayrollPdf(
       doc.on('error', reject)
 
       drawHeader(doc, period)
-      drawTable(doc, summary)
+      drawTable(doc, summary, rows)
       stampFooters(doc)
 
       doc.end()
@@ -93,7 +99,7 @@ function drawHeader(doc: Doc, period: PayPeriod): void {
 }
 
 type Column = {
-  key: 'employee' | 'rate' | 'shifts' | 'hours' | 'gross' | 'meal' | 'net' | 'alcohol'
+  key: 'emp_num' | 'dept' | 'employee' | 'rate' | 'shifts' | 'hours' | 'gross' | 'meal' | 'net' | 'alcohol'
   label: string
   width: number
   align: 'left' | 'right'
@@ -103,28 +109,32 @@ function buildColumns(doc: Doc): Column[] {
   const usable = doc.page.width - doc.page.margins.left - doc.page.margins.right
   // Ratios sum to 1.0
   const ratios = {
-    employee: 0.24,
-    rate: 0.09,
-    shifts: 0.08,
-    hours: 0.1,
-    gross: 0.13,
-    meal: 0.11,
-    net: 0.13,
-    alcohol: 0.12,
+    emp_num:  0.07,
+    dept:     0.10,
+    employee: 0.17,
+    rate:     0.08,
+    shifts:   0.07,
+    hours:    0.09,
+    gross:    0.12,
+    meal:     0.09,
+    net:      0.11,
+    alcohol:  0.10,
   }
   return [
-    { key: 'employee', label: 'Employee', width: usable * ratios.employee, align: 'left' },
-    { key: 'rate', label: 'Rate', width: usable * ratios.rate, align: 'right' },
-    { key: 'shifts', label: 'Shifts', width: usable * ratios.shifts, align: 'right' },
-    { key: 'hours', label: 'Hours', width: usable * ratios.hours, align: 'right' },
-    { key: 'gross', label: 'Gross pay', width: usable * ratios.gross, align: 'right' },
-    { key: 'meal', label: 'Meal $', width: usable * ratios.meal, align: 'right' },
-    { key: 'net', label: 'Net pay', width: usable * ratios.net, align: 'right' },
-    { key: 'alcohol', label: 'Alcohol pts', width: usable * ratios.alcohol, align: 'right' },
+    { key: 'emp_num',  label: 'Emp #',       width: usable * ratios.emp_num,  align: 'left'  },
+    { key: 'dept',     label: 'Dept',         width: usable * ratios.dept,     align: 'left'  },
+    { key: 'employee', label: 'Employee',     width: usable * ratios.employee, align: 'left'  },
+    { key: 'rate',     label: 'Rate',         width: usable * ratios.rate,     align: 'right' },
+    { key: 'shifts',   label: 'Shifts',       width: usable * ratios.shifts,   align: 'right' },
+    { key: 'hours',    label: 'Hours',        width: usable * ratios.hours,    align: 'right' },
+    { key: 'gross',    label: 'Gross pay',    width: usable * ratios.gross,    align: 'right' },
+    { key: 'meal',     label: 'Meal $',       width: usable * ratios.meal,     align: 'right' },
+    { key: 'net',      label: 'Net pay',      width: usable * ratios.net,      align: 'right' },
+    { key: 'alcohol',  label: 'Alcohol pts',  width: usable * ratios.alcohol,  align: 'right' },
   ]
 }
 
-function drawTable(doc: Doc, summary: BiweeklySummary): void {
+function drawTable(doc: Doc, summary: BiweeklySummary, rows: EnrichedPayrollRow[]): void {
   const cols = buildColumns(doc)
   const rowPadX = 6
   const rowPadY = 6
@@ -192,7 +202,7 @@ function drawTable(doc: Doc, summary: BiweeklySummary): void {
   }
 
   let zebra = false
-  for (const r of summary.rows) {
+  for (const r of rows) {
     ensureSpace(rowHeight)
     const y = doc.y
     const xStart = doc.page.margins.left
@@ -208,14 +218,16 @@ function drawTable(doc: Doc, summary: BiweeklySummary): void {
     zebra = !zebra
 
     const values: Record<Column['key'], string> = {
+      emp_num:  r.employee_number != null ? String(r.employee_number) : '—',
+      dept:     r.department ?? '—',
       employee: r.employee_name,
-      rate: `$${r.hourly_rate.toFixed(2)}`,
-      shifts: r.shift_count.toString(),
-      hours: r.total_hours.toFixed(2),
-      gross: `$${r.gross_pay.toFixed(2)}`,
-      meal: r.meal_count > 0 ? `−$${r.meal_deduction.toFixed(2)}` : '—',
-      net: `$${r.net_pay.toFixed(2)}`,
-      alcohol: r.alcohol_points.toString(),
+      rate:     `$${r.hourly_rate.toFixed(2)}`,
+      shifts:   r.shift_count.toString(),
+      hours:    r.total_hours.toFixed(2),
+      gross:    `$${r.gross_pay.toFixed(2)}`,
+      meal:     r.meal_count > 0 ? `−$${r.meal_deduction.toFixed(2)}` : '—',
+      net:      `$${r.net_pay.toFixed(2)}`,
+      alcohol:  r.alcohol_points.toString(),
     }
 
     let x = xStart
@@ -254,14 +266,16 @@ function drawTable(doc: Doc, summary: BiweeklySummary): void {
     .restore()
 
   const totalValues: Record<Column['key'], string> = {
+    emp_num:  '',
+    dept:     '',
     employee: 'TOTAL',
-    rate: '',
-    shifts: '',
-    hours: summary.total_hours.toFixed(2),
-    gross: `$${summary.total_gross_pay.toFixed(2)}`,
-    meal: `−$${summary.total_meal_deduction.toFixed(2)}`,
-    net: `$${summary.total_pay.toFixed(2)}`,
-    alcohol: summary.total_alcohol_points.toString(),
+    rate:     '',
+    shifts:   '',
+    hours:    summary.total_hours.toFixed(2),
+    gross:    `$${summary.total_gross_pay.toFixed(2)}`,
+    meal:     `−$${summary.total_meal_deduction.toFixed(2)}`,
+    net:      `$${summary.total_pay.toFixed(2)}`,
+    alcohol:  summary.total_alcohol_points.toString(),
   }
 
   let x = xStart

@@ -49,6 +49,10 @@ export function ChangeDateButton({ sheetId, currentDate }: { sheetId: string; cu
           type="date"
           value={value}
           onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save()
+            if (e.key === 'Escape') cancel()
+          }}
           className="input w-auto"
           autoFocus
           disabled={pending}
@@ -56,7 +60,7 @@ export function ChangeDateButton({ sheetId, currentDate }: { sheetId: string; cu
         <button
           type="button"
           onClick={save}
-          disabled={pending || !value}
+          disabled={pending || !value || value === currentDate}
           className="btn-tertiary text-xs"
         >
           {pending ? '…' : 'Save'}

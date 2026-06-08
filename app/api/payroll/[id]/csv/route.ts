@@ -2,15 +2,24 @@ import { NextRequest } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { summarizePayPeriod } from '@/lib/payroll'
 import type { PayPeriod, DailySheet, Shift, AlcoholSale } from '@/lib/types/db'
+import { buildEnrichedRows } from '@/lib/payroll-export'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 type SheetWithChildren = DailySheet & { shifts: Shift[]; alcohol_sales: AlcoholSale[] }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id]/csv'>) {
   const { id } = await ctx.params
-  const supabase = getSupabaseAdmin()
+  if (!UUID_RE.test(id)) return new Response('Invalid id', { status: 400 })
+  let supabase: ReturnType<typeof getSupabaseAdmin>
+  try {
+    supabase = getSupabaseAdmin()
+  } catch (err) {
+    return new Response(err instanceof Error ? err.message : 'Supabase not configured', { status: 503 })
+  }
 
   const [{ data: periodRow, error: periodErr }, { data: sheetsRow, error: sheetsErr }] =
     await Promise.all([
@@ -37,14 +46,14 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
     }))
   )
 
+  const rows = await buildEnrichedRows(summary, supabase)
+
   const lines: string[] = []
+  lines.push(`# Mandarin Timesheet — ${period.start_date} to ${period.end_date}`)
   lines.push(
     [
-      `# Mandarin Timesheet — ${period.start_date} to ${period.end_date}`,
-    ].join(',')
-  )
-  lines.push(
-    [
+      'Emp #',
+      'Department',
       'Employee',
       'Rate',
       'Shifts',
@@ -56,9 +65,11 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
       'Alcohol points',
     ].join(',')
   )
-  for (const r of summary.rows) {
+  for (const r of rows) {
     lines.push(
       [
+        r.employee_number != null ? r.employee_number.toString() : '',
+        csvField(r.department ?? ''),
         csvField(r.employee_name),
         r.hourly_rate.toFixed(2),
         r.shift_count.toString(),
@@ -73,6 +84,8 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
   }
   lines.push(
     [
+      '',
+      '',
       'TOTAL',
       '',
       '',
