@@ -112,7 +112,7 @@ export async function approveScannedSheet(input: ApproveInputType): Promise<Appr
       }
     }
     if (Object.keys(updates).length > 0) {
-      await supabase.from('daily_sheets').update(updates).eq('id', dailySheetId!).catch(() => {})
+      try { await supabase.from('daily_sheets').update(updates).eq('id', dailySheetId!) } catch { }
     }
   }
 
