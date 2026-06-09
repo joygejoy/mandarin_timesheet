@@ -156,14 +156,16 @@ export async function approveScannedSheet(input: ApproveInputType): Promise<Appr
 
   // Save alcohol points entered during the scan review step (servers only).
   if (data.alcohol_points && data.alcohol_points.length > 0) {
-    await supabase.from('alcohol_sales').insert(
-      data.alcohol_points.map((p) => ({
-        daily_sheet_id: dailySheetId!,
-        employee_id: p.employee_id,
-        employee_name_snapshot: p.employee_name,
-        drink_points: p.drink_points,
-      }))
-    ).catch(() => {})
+    try {
+      await supabase.from('alcohol_sales').insert(
+        data.alcohol_points.map((p) => ({
+          daily_sheet_id: dailySheetId!,
+          employee_id: p.employee_id,
+          employee_name_snapshot: p.employee_name,
+          drink_points: p.drink_points,
+        }))
+      )
+    } catch { }
   }
 
   // Archive raw OCR for audit / re-review.
