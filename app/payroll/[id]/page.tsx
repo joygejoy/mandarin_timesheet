@@ -314,7 +314,7 @@ function PerEmployeeTable({
   return (
     <div className="surface overflow-x-auto">
       <table className="min-w-full text-sm">
-        <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
+        <thead className="sticky top-0 z-10 border-b border-[color:var(--border)] bg-[color:var(--surface)] text-left text-xs font-normal text-[color:var(--muted)]">
           <tr>
             <th className="px-3 py-2.5 font-normal">Employee</th>
             <th className="px-3 py-2.5 font-normal text-right">Rate</th>

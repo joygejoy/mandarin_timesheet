@@ -315,7 +315,7 @@ THE SHEET HAS THESE COLUMNS FROM LEFT TO RIGHT (memorize this order — it is th
   Col 8: Initial
   Col 9: Break End Time   → maps to output field  break_end_time   (a time INSIDE the shift, when they came back from break)
   Col 10: Initial
-  Col 11: Section Share   → IGNORE as a data field (never extract a dollar amount or percentage from it). EXCEPTION: if the text written in this column is a break/meal annotation ("No Meal", "No Break", "no break no meal"), treat it as applying to that row and process it like any other annotation.
+  Col 11: Section Share   → IGNORE as a data field (never extract a dollar amount or percentage from it). EXCEPTION: if the text written in this column is a break/meal annotation ("No Meal", "No Break", "no break no meal", "NM", "NB", "NB/NM"), treat it as applying to that row and process it like any other annotation. ALWAYS scan this column — annotations here are easy to miss and are critical for correct meal/break defaults.
 
 CRITICAL — the most common mistakes the model makes:
 - DO NOT confuse Sign Out Time (Col 5) with Break Start Time (Col 7). They are TWO COLUMNS APART, separated by an Initial column. Read by counting columns from the left.

@@ -48,37 +48,47 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
 
   const rows = await buildEnrichedRows(summary, supabase)
 
+  // Day-of-week order: Mon(1)→Tue(2)→Wed(3)→Thu(4)→Fri(5)→Sat(6)→Sun(0)
+  const DOW_ORDER = [1, 2, 3, 4, 5, 6, 0]
+  const DOW_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+  function hoursByDow(byDate: Record<string, { minutes: number }>): number[] {
+    const totals = [0, 0, 0, 0, 0, 0, 0] // index = DOW_ORDER position
+    for (const [dateStr, cell] of Object.entries(byDate)) {
+      const jsDay = new Date(dateStr + 'T12:00:00').getDay() // 0=Sun…6=Sat
+      const idx = DOW_ORDER.indexOf(jsDay)
+      if (idx !== -1) totals[idx] += cell.minutes
+    }
+    // Round each day's total down to 15-min interval, then convert to hours
+    return totals.map((m) => Math.floor(m / 15) * 15 / 60)
+  }
+
   const lines: string[] = []
   lines.push(`# Mandarin Timesheet — ${period.start_date} to ${period.end_date}`)
   lines.push(
     [
       'Emp #',
       'Department',
-      'Employee',
-      'Rate',
-      'Shifts',
-      'Hours',
-      'Gross pay',
-      'Meals',
-      'Meal deduction',
-      'Net pay',
-      'Alcohol points',
+      'Name',
+      'Total Hours',
+      'Meal',
+      'Alcohol Count',
+      ...DOW_LABELS,
+      'Total Hours',
     ].join(',')
   )
   for (const r of rows) {
+    const dow = hoursByDow(r.by_date)
     lines.push(
       [
         r.employee_number != null ? r.employee_number.toString() : '',
         csvField(r.department ?? ''),
         csvField(r.employee_name),
-        r.hourly_rate.toFixed(2),
-        r.shift_count.toString(),
         r.total_hours.toFixed(2),
-        r.gross_pay.toFixed(2),
-        r.meal_count.toString(),
-        r.meal_deduction.toFixed(2),
-        r.net_pay.toFixed(2),
+        r.meal_count > 0 ? 'Yes' : 'No',
         r.alcohol_points.toString(),
+        ...dow.map((h) => h > 0 ? h.toFixed(2) : ''),
+        r.total_hours.toFixed(2),
       ].join(',')
     )
   }
@@ -87,14 +97,11 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
       '',
       '',
       'TOTAL',
-      '',
-      '',
       summary.total_hours.toFixed(2),
-      summary.total_gross_pay.toFixed(2),
       '',
-      summary.total_meal_deduction.toFixed(2),
-      summary.total_pay.toFixed(2),
       summary.total_alcohol_points.toString(),
+      ...DOW_LABELS.map(() => ''),
+      summary.total_hours.toFixed(2),
     ].join(',')
   )
 

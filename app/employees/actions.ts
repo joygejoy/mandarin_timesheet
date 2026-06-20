@@ -142,6 +142,36 @@ export async function setAllWagesToMinimum(): Promise<{ updated: number }> {
   return { updated: count ?? 0 }
 }
 
+/**
+ * Quick-create an employee from the scan page without redirecting.
+ * Returns the newly created employee row.
+ */
+export async function quickCreateEmployee(data: {
+  full_name: string
+  employee_number: number | null
+  role: string | null
+  hourly_rate: number
+}) {
+  const supabase = getSupabaseAdmin()
+  const { data: emp, error } = await supabase
+    .from('employees')
+    .insert({
+      full_name: data.full_name.trim(),
+      employee_number: data.employee_number ?? null,
+      role: data.role?.trim() || null,
+      hourly_rate: data.hourly_rate,
+      active: true,
+      default_break_minutes: 0,
+      default_meal_provided: true,
+    })
+    .select()
+    .single()
+  if (error) throw new Error(error.message)
+  revalidatePath('/employees')
+  revalidatePath('/scan')
+  return emp
+}
+
 /** Inline rate update from the list. */
 export async function updateEmployeeRate(id: string, hourly_rate: number) {
   if (!Number.isFinite(hourly_rate) || hourly_rate < 0 || hourly_rate > 999) {

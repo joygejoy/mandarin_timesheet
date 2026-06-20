@@ -26,13 +26,14 @@ export function shiftGrossMinutes(shift: Pick<Shift, 'start_time' | 'end_time'>)
   return diff
 }
 
-/** Paid minutes after subtracting break and applying manual adjustment. */
+/** Paid minutes after subtracting break and applying manual adjustment, rounded down to the nearest 15-minute interval. */
 export function shiftPaidMinutes(
   shift: Pick<Shift, 'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes'>
 ): number {
   const gross = shiftGrossMinutes(shift)
   const after = gross - (shift.break_minutes ?? 0) + (shift.manual_adjustment_minutes ?? 0)
-  return Math.max(0, after)
+  const raw = Math.max(0, after)
+  return Math.floor(raw / 15) * 15
 }
 
 export function shiftPaidHours(

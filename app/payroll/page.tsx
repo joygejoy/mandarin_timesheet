@@ -83,9 +83,13 @@ function PeriodList({ rows }: { rows: PayPeriod[] }) {
           </thead>
           <tbody className="divide-y divide-[color:var(--border)]">
             {rows.map((p) => (
-              <tr key={p.id}>
+              <tr key={p.id} className="relative cursor-pointer hover:bg-black/5 dark:hover:bg-white/5">
                 <td className="px-3 py-2.5 font-medium">
-                  <Link href={`/payroll/${p.id}`} className="link-soft">
+                  {/* after:absolute after:inset-0 makes this link cover the entire row */}
+                  <Link
+                    href={`/payroll/${p.id}`}
+                    className="font-medium after:absolute after:inset-0 after:content-['']"
+                  >
                     {fmtRange(p.start_date, p.end_date)}
                   </Link>
                 </td>
@@ -93,9 +97,7 @@ function PeriodList({ rows }: { rows: PayPeriod[] }) {
                   <StatusDot status={p.status} />
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <Link href={`/payroll/${p.id}`} className="btn-ghost text-xs">
-                    Open
-                  </Link>
+                  <span className="btn-ghost pointer-events-none text-xs">Open →</span>
                 </td>
               </tr>
             ))}

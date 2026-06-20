@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { approveScannedSheet, type ApproveInputType } from './actions'
+import { quickCreateEmployee } from '@/app/employees/actions'
 import { EmployeeCombobox } from '@/app/_components/EmployeeCombobox'
 import { DEFAULT_WAGE_RATE } from '@/lib/wages'
 import type { Employee } from '@/lib/types/db'
@@ -50,8 +51,13 @@ type BatchItem = {
   rotation: 0 | 90 | 180 | 270
   /** 'auto' = date came from file metadata; 'manual' = user typed/picked it */
   dateSource: 'auto' | 'manual'
-  /** OCR pre-fetch runs in the background while user fills in the form */
-  ocrStatus: 'processing' | 'done' | 'error'
+  /**
+   * 'pending'    = waiting for user to confirm date/shift before OCR starts
+   * 'processing' = OCR request in flight
+   * 'done'       = OCR succeeded
+   * 'error'      = OCR failed
+   */
+  ocrStatus: 'pending' | 'processing' | 'done' | 'error'
   ocrResult: ApiResponse | null
   ocrError: string | null
 }
@@ -106,6 +112,9 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   // Single-upload rotation preview before OCR fires
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [singleRotation, setSingleRotation] = useState<0 | 90 | 180 | 270>(0)
+  // Rotation that was actually baked into the image sent to OCR — used to keep
+  // the preview oriented correctly in the extracting and review steps.
+  const [scanRotation, setScanRotation] = useState<0 | 90 | 180 | 270>(0)
   // Single-sheet shift type hint (let user pre-select before scanning)
   const [shiftTypeHint, setShiftTypeHint] = useState<'lunch' | 'dinner' | null>(null)
   // Batch state
@@ -114,11 +123,14 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   const [batchSaved, setBatchSaved] = useState(0)
   const [batchTotal, setBatchTotal] = useState(0)
 
+  const [addedEmployees, setAddedEmployees] = useState<Employee[]>([])
+  const allEmployees = useMemo(() => [...employees, ...addedEmployees], [employees, addedEmployees])
+
   const employeeByLowerName = useMemo(() => {
     const m = new Map<string, Employee>()
-    for (const e of employees) m.set(e.full_name.toLowerCase(), e)
+    for (const e of allEmployees) m.set(e.full_name.toLowerCase(), e)
     return m
-  }, [employees])
+  }, [allEmployees])
 
   function resolveEmployee(name: string): Employee | undefined {
     return employeeByLowerName.get(name.trim().toLowerCase())
@@ -132,24 +144,23 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     rotation = 0,
   ) {
     const useDate = overrideDate ?? manualDate
-    if (!useDate) {
-      setError('Enter the sheet date before scanning.')
-      return
-    }
     if (previewUrl) URL.revokeObjectURL(previewUrl)
-    setPreviewUrl(URL.createObjectURL(file))
     setError(null)
     setStep('extracting')
+
+    // Always compress+rotate first so the preview URL is a geometrically correct
+    // JPEG with no EXIF tricks. CSS transform was the previous approach but it
+    // doesn't change the layout box, causing 90°/270° images to overflow their
+    // container. The canvas output has rotation baked in and needs no CSS fix.
+    const uploadBlob = await compressImage(file, 2048, 0.85, rotation)
+    setPreviewUrl(URL.createObjectURL(uploadBlob))
+    setScanRotation(0)
 
     let json: ApiResponse
     if (preloadedResult?.sheet) {
       // Already fetched in the background — skip the network wait entirely.
       json = preloadedResult
     } else {
-      // Vercel caps serverless payloads at 4.5 MB. Phone cameras produce 8–15 MB
-      // JPEGs, so compress client-side first. OpenAI's vision API processes images
-      // at 2048 px max anyway, so accuracy is unchanged. Rotation is baked in here.
-      const uploadBlob = await compressImage(file, 2048, 0.85, rotation)
       const fd = new FormData()
       fd.append('file', uploadBlob, file.name.replace(/\.[^.]+$/, '.jpg'))
       let res: Response
@@ -195,7 +206,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
 
       const rawBreak = s.break_minutes ?? 0
       // "No Break" in notes is authoritative — always 0, even on lunch shifts.
-      const noBreak = /no[\s-]?break/i.test(s.notes ?? '')
+      const noBreak = /no[\s-]?break|\bNB\b/i.test(s.notes ?? '')
       // For lunch, default to 30 when break info is genuinely missing (OCR saw
       // nothing and no annotation). If OCR returned a value, use it.
       const breakMins = noBreak
@@ -207,7 +218,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
       // Default meal to provided UNLESS the notes explicitly say "no meal".
       // The OCR returns false as its default (when not mentioned), so we can't
       // trust meal_provided=false alone — we need the text evidence.
-      const noMeal = /no[\s-]?meal/i.test(s.notes ?? '')
+      const noMeal = /no[\s-]?meal|\bNM\b/i.test(s.notes ?? '')
       const mealProvided = !noMeal
 
       return {
@@ -272,29 +283,47 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         shiftType: 'dinner' as const,
         rotation: 0 as const,
         dateSource: suggested ? 'auto' as const : 'manual' as const,
-        ocrStatus: 'processing' as const,
+        ocrStatus: 'pending' as const,
         ocrResult: null,
         ocrError: null,
       }
     })
     setBatchItems(items)
     setStep('batch-stage')
-    // Start OCR for all photos immediately — results arrive while the user
-    // is still filling in dates, so by the time they hit "Scan" most are ready.
-    items.forEach((item) => { startBatchOcr(item.id, item.file) })
+    // OCR does NOT start automatically — the user must confirm date/shift
+    // for each photo first (via the lightbox or the per-card Confirm button).
   }
 
   function handleBatchRotate(id: string, newRotation: 0 | 90 | 180 | 270) {
     const item = batchItems.find((b) => b.id === id)
     if (!item) return
+    if (item.ocrStatus === 'pending') {
+      // Not yet confirmed — just update the rotation preview, no OCR yet.
+      setBatchItems((prev) =>
+        prev.map((b) => b.id === id ? { ...b, rotation: newRotation } : b)
+      )
+    } else {
+      // Already submitted — restart OCR with the new rotation.
+      setBatchItems((prev) =>
+        prev.map((b) =>
+          b.id === id
+            ? { ...b, rotation: newRotation, ocrStatus: 'processing', ocrResult: null, ocrError: null }
+            : b
+        )
+      )
+      startBatchOcr(id, item.file, newRotation)
+    }
+  }
+
+  function confirmBatchItem(id: string) {
+    const item = batchItems.find((b) => b.id === id)
+    if (!item || item.ocrStatus !== 'pending') return
     setBatchItems((prev) =>
       prev.map((b) =>
-        b.id === id
-          ? { ...b, rotation: newRotation, ocrStatus: 'processing', ocrResult: null, ocrError: null }
-          : b
+        b.id === id ? { ...b, ocrStatus: 'processing', ocrResult: null, ocrError: null } : b
       )
     )
-    startBatchOcr(id, item.file, newRotation)
+    startBatchOcr(id, item.file, item.rotation)
   }
 
   function patchCandidate(id: string, patch: Partial<Candidate>) {
@@ -303,7 +332,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
 
   function onEmployeeChange(id: string, picked: { id: string | null; label: string }) {
     if (picked.id) {
-      const e = employees.find((x) => x.id === picked.id)
+      const e = allEmployees.find((x) => x.id === picked.id)
       if (e) {
         patchCandidate(id, {
           employee_id: e.id,
@@ -352,6 +381,15 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setError(null)
     if (!sheetDate) {
       setError('Pick a date for this sheet first.')
+      return
+    }
+    const unmatchedNames = candidates
+      .filter((c) => c.include && !c.employee_id && c.employee_name.trim())
+      .map((c) => c.employee_name.trim())
+    if (unmatchedNames.length > 0) {
+      setError(
+        `Cannot save: ${unmatchedNames.join(', ')} ${unmatchedNames.length === 1 ? 'is' : 'are'} not in the employee roster. Use the "Add to Employees" button on each unmatched row, or deselect those rows.`
+      )
       return
     }
     const rows = candidates
@@ -514,6 +552,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
           setBatchItems((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)))
         }
         onRotate={handleBatchRotate}
+        onConfirmItem={confirmBatchItem}
         onConfirm={() => {
           const [first, ...rest] = batchItems
           setBatchQueue(rest)
@@ -662,7 +701,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
               <p className="mb-1 text-xs font-medium text-[color:var(--muted)]">Sheet date</p>
               <p className="text-sm font-semibold">{manualDate}</p>
             </div>
-            <ExtractingView previewUrl={previewUrl} />
+            <ExtractingView previewUrl={previewUrl} rotation={scanRotation} />
           </>
         )}
         {error && (
@@ -678,6 +717,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
 
   const selectedCount = candidates.filter((c) => c.include).length
   const flaggedCount = candidates.filter((c) => c.include && c.needs_review).length
+  const unmatchedCount = candidates.filter((c) => c.include && !c.employee_id && c.employee_name.trim()).length
   const hasServers = candidates.some((c) => !isBusperson(c.role))
 
   return (
@@ -698,6 +738,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
                 src={previewUrl}
                 alt="Sheet"
                 className="max-h-[80vh] w-full rounded object-contain"
+                style={scanRotation ? { transform: `rotate(${scanRotation}deg)` } : undefined}
               />
             )}
           </div>
@@ -714,6 +755,18 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
             shiftType={meta?.shift_type ?? null}
             setShiftType={(v) => setMeta((m) => m ? { ...m, shift_type: v } : m)}
           />
+
+          {unmatchedCount > 0 && (
+            <div className="surface border-l-2 border-l-rose-500 p-3 text-sm">
+              <p className="font-medium text-rose-700 dark:text-rose-400">
+                {unmatchedCount} {unmatchedCount === 1 ? 'row has an' : 'rows have'} unmatched employee
+              </p>
+              <p className="mt-1 text-xs text-[color:var(--muted)]">
+                These names were not found in the employee roster. Use the{' '}
+                <strong>Add to Employees</strong> button on each row to add them before saving.
+              </p>
+            </div>
+          )}
 
           {flaggedCount > 0 && (
             <div className="surface border-l-2 border-l-amber-500 p-3 text-sm">
@@ -742,9 +795,19 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
                 key={c.id}
                 c={c}
                 index={i}
-                employees={employees}
+                employees={allEmployees}
                 onPatch={(p) => patchCandidate(c.id, p)}
                 onEmployeeChange={(picked) => onEmployeeChange(c.id, picked)}
+                onEmployeeAdded={(emp) => {
+                  setAddedEmployees((prev) => [...prev, emp])
+                  patchCandidate(c.id, {
+                    employee_id: emp.id,
+                    employee_name: emp.full_name,
+                    hourly_rate: emp.hourly_rate,
+                    role: emp.role ?? '',
+                    needs_review: false,
+                  })
+                }}
               />
             ))}
           </div>
@@ -771,9 +834,19 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
                     key={c.id}
                     c={c}
                     rowIdx={rowIdx}
-                    employees={employees}
+                    employees={allEmployees}
                     onPatch={(p) => patchCandidate(c.id, p)}
                     onEmployeeChange={(picked) => onEmployeeChange(c.id, picked)}
+                    onEmployeeAdded={(emp) => {
+                      setAddedEmployees((prev) => [...prev, emp])
+                      patchCandidate(c.id, {
+                        employee_id: emp.id,
+                        employee_name: emp.full_name,
+                        hourly_rate: emp.hourly_rate,
+                        role: emp.role ?? '',
+                        needs_review: false,
+                      })
+                    }}
                     showPoints={hasServers}
                   />
                 ))}
@@ -904,7 +977,7 @@ function DropZone({
 
 // ---- ExtractingView ---------------------------------------------------------
 
-function ExtractingView({ previewUrl }: { previewUrl: string | null }) {
+function ExtractingView({ previewUrl, rotation = 0 }: { previewUrl: string | null; rotation?: number }) {
   const [msgIdx, setMsgIdx] = useState(0)
 
   useEffect(() => {
@@ -921,6 +994,7 @@ function ExtractingView({ previewUrl }: { previewUrl: string | null }) {
             src={previewUrl}
             alt="Sheet being scanned"
             className="max-h-96 w-full object-contain"
+            style={rotation ? { transform: `rotate(${rotation}deg)` } : undefined}
           />
           {/* Animated scan line sweeping top → bottom */}
           <div
@@ -958,12 +1032,14 @@ function ShiftCard({
   employees,
   onPatch,
   onEmployeeChange,
+  onEmployeeAdded,
 }: {
   c: Candidate
   index: number
   employees: Employee[]
   onPatch: (p: Partial<Candidate>) => void
   onEmployeeChange: (picked: { id: string | null; label: string }) => void
+  onEmployeeAdded: (emp: Employee) => void
 }) {
   const flagged = c.needs_review
   const lowConf = c.confidence < 0.8
@@ -975,6 +1051,32 @@ function ShiftCard({
     flagged && (lowConf || c.inferred_from_bracket) && c.end_time === c.predicted_end_time && !endMissing
   const hours = computeShiftHours(c.start_time, c.end_time, c.break_minutes)
   const hoursWarn = c.include && hours !== null && (hours > 7 || hours < 3)
+
+  const isUnmatched = c.include && !c.employee_id && c.employee_name.trim().length > 0
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [addForm, setAddForm] = useState({ name: c.employee_name, empNumber: '', role: c.role, rate: c.hourly_rate })
+  const [addLoading, setAddLoading] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
+
+  async function handleQuickAdd() {
+    if (!addForm.name.trim()) return
+    setAddLoading(true)
+    setAddError(null)
+    try {
+      const emp = await quickCreateEmployee({
+        full_name: addForm.name,
+        employee_number: addForm.empNumber ? parseInt(addForm.empNumber, 10) : null,
+        role: addForm.role || null,
+        hourly_rate: addForm.rate,
+      })
+      onEmployeeAdded(emp as Employee)
+      setShowAddForm(false)
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Failed to add employee')
+    } finally {
+      setAddLoading(false)
+    }
+  }
 
   return (
     <div
@@ -1004,6 +1106,45 @@ function ShiftCard({
             customLabel={c.employee_name}
             onChange={onEmployeeChange}
           />
+          {isUnmatched && !showAddForm && (
+            <button
+              type="button"
+              onClick={() => { setAddForm({ name: c.employee_name, empNumber: '', role: c.role, rate: c.hourly_rate }); setShowAddForm(true) }}
+              className="mt-2 btn-secondary px-2 py-1 text-xs text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-700 w-full"
+            >
+              + Add &ldquo;{c.employee_name}&rdquo; to employees
+            </button>
+          )}
+          {isUnmatched && showAddForm && (
+            <div className="mt-2 space-y-1.5 rounded-md border border-rose-300 bg-rose-50/60 dark:border-rose-800 dark:bg-rose-950/30 p-2.5 text-xs">
+              <p className="font-medium text-rose-800 dark:text-rose-300">Add to employee roster</p>
+              <label className="block">
+                <span className="text-[color:var(--muted)]">Name</span>
+                <input className="input mt-0.5 w-full" value={addForm.name} onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))} />
+              </label>
+              <label className="block">
+                <span className="text-[color:var(--muted)]">Emp #</span>
+                <input className="input mt-0.5 w-full" type="number" value={addForm.empNumber} onChange={(e) => setAddForm((f) => ({ ...f, empNumber: e.target.value }))} />
+              </label>
+              <label className="block">
+                <span className="text-[color:var(--muted)]">Role</span>
+                <input className="input mt-0.5 w-full" value={addForm.role} placeholder="Server / Busperson" onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value }))} />
+              </label>
+              <label className="block">
+                <span className="text-[color:var(--muted)]">Rate ($/hr)</span>
+                <input className="input mt-0.5 w-full" type="number" step="0.01" value={addForm.rate} onChange={(e) => setAddForm((f) => ({ ...f, rate: Number(e.target.value) }))} />
+              </label>
+              {addError && <p className="text-rose-700 dark:text-rose-400">{addError}</p>}
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={handleQuickAdd} disabled={addLoading} className="btn-primary px-3 py-1 text-xs">
+                  {addLoading ? 'Saving…' : 'Save employee'}
+                </button>
+                <button type="button" onClick={() => setShowAddForm(false)} className="btn-secondary px-3 py-1 text-xs">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           {flagged && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
@@ -1030,10 +1171,7 @@ function ShiftCard({
             <TimeInput value={c.start_time} onChange={(v) => onPatch({ start_time: v })} />
             {startMissing && c.include && <ReviewHint label="missing — fill in" />}
             {startSuspect && (
-              <ReviewHint
-                label="check time"
-                modelSaid={c.predicted_start_time ? formatTime12(c.predicted_start_time) : null}
-              />
+              <ReviewHint label="check time" />
             )}
           </CellShell>
         </div>
@@ -1043,10 +1181,7 @@ function ShiftCard({
             <TimeInput value={c.end_time} onChange={(v) => onPatch({ end_time: v })} />
             {endMissing && c.include && <ReviewHint label="missing — fill in" />}
             {endSuspect && (
-              <ReviewHint
-                label="check time"
-                modelSaid={c.predicted_end_time ? formatTime12(c.predicted_end_time) : null}
-              />
+              <ReviewHint label="check time" />
             )}
           </CellShell>
         </div>
@@ -1225,6 +1360,7 @@ function Row({
   employees,
   onPatch,
   onEmployeeChange,
+  onEmployeeAdded,
   showPoints,
 }: {
   c: Candidate
@@ -1232,6 +1368,7 @@ function Row({
   employees: Employee[]
   onPatch: (p: Partial<Candidate>) => void
   onEmployeeChange: (picked: { id: string | null; label: string }) => void
+  onEmployeeAdded: (emp: Employee) => void
   showPoints: boolean
 }) {
   const flagged = c.needs_review
@@ -1261,6 +1398,32 @@ function Row({
     hoursWarn ? 'bg-rose-50/40 dark:bg-rose-950/20' : '',
   ].join(' ')
 
+  const isUnmatched = c.include && !c.employee_id && c.employee_name.trim().length > 0
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [addForm, setAddForm] = useState({ name: c.employee_name, empNumber: '', role: c.role, rate: c.hourly_rate })
+  const [addLoading, setAddLoading] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
+
+  async function handleQuickAdd() {
+    if (!addForm.name.trim()) return
+    setAddLoading(true)
+    setAddError(null)
+    try {
+      const emp = await quickCreateEmployee({
+        full_name: addForm.name,
+        employee_number: addForm.empNumber ? parseInt(addForm.empNumber, 10) : null,
+        role: addForm.role || null,
+        hourly_rate: addForm.rate,
+      })
+      onEmployeeAdded(emp as Employee)
+      setShowAddForm(false)
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Failed to add employee')
+    } finally {
+      setAddLoading(false)
+    }
+  }
+
   return (
     <tr className={rowClass}>
       <td className="px-2 py-2 align-top">
@@ -1282,6 +1445,45 @@ function Row({
           onChange={onEmployeeChange}
           className="min-w-44"
         />
+        {isUnmatched && !showAddForm && (
+          <button
+            type="button"
+            onClick={() => { setAddForm({ name: c.employee_name, empNumber: '', role: c.role, rate: c.hourly_rate }); setShowAddForm(true) }}
+            className="mt-1.5 btn-secondary px-2 py-1 text-xs text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-700"
+          >
+            + Add &ldquo;{c.employee_name}&rdquo; to employees
+          </button>
+        )}
+        {isUnmatched && showAddForm && (
+          <div className="mt-2 space-y-1.5 rounded-md border border-rose-300 bg-rose-50/60 dark:border-rose-800 dark:bg-rose-950/30 p-2.5 text-xs">
+            <p className="font-medium text-rose-800 dark:text-rose-300">Add to employee roster</p>
+            <label className="block">
+              <span className="text-[color:var(--muted)]">Name</span>
+              <input className="input mt-0.5 w-full" value={addForm.name} onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))} />
+            </label>
+            <label className="block">
+              <span className="text-[color:var(--muted)]">Emp #</span>
+              <input className="input mt-0.5 w-full" type="number" value={addForm.empNumber} onChange={(e) => setAddForm((f) => ({ ...f, empNumber: e.target.value }))} />
+            </label>
+            <label className="block">
+              <span className="text-[color:var(--muted)]">Role</span>
+              <input className="input mt-0.5 w-full" value={addForm.role} placeholder="Server / Busperson" onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value }))} />
+            </label>
+            <label className="block">
+              <span className="text-[color:var(--muted)]">Rate ($/hr)</span>
+              <input className="input mt-0.5 w-full" type="number" step="0.01" value={addForm.rate} onChange={(e) => setAddForm((f) => ({ ...f, rate: Number(e.target.value) }))} />
+            </label>
+            {addError && <p className="text-rose-700 dark:text-rose-400">{addError}</p>}
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={handleQuickAdd} disabled={addLoading} className="btn-primary px-3 py-1 text-xs">
+                {addLoading ? 'Saving…' : 'Save employee'}
+              </button>
+              <button type="button" onClick={() => setShowAddForm(false)} className="btn-secondary px-3 py-1 text-xs">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         {flagged && (
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <button
@@ -1307,12 +1509,7 @@ function Row({
             navCol={1}
           />
           {startMissing && c.include && <ReviewHint label="missing — fill in" />}
-          {startSuspect && (
-            <ReviewHint
-              label="check time"
-              modelSaid={c.predicted_start_time ? formatTime12(c.predicted_start_time) : null}
-            />
-          )}
+          {startSuspect && <ReviewHint label="check time" />}
         </CellShell>
       </td>
       <td className="px-2 py-2 align-top">
@@ -1324,12 +1521,7 @@ function Row({
             navCol={2}
           />
           {endMissing && c.include && <ReviewHint label="missing — fill in" />}
-          {endSuspect && (
-            <ReviewHint
-              label="check time"
-              modelSaid={c.predicted_end_time ? formatTime12(c.predicted_end_time) : null}
-            />
-          )}
+          {endSuspect && <ReviewHint label="check time" />}
         </CellShell>
       </td>
       <td className="px-2 py-2 align-top">
@@ -1497,22 +1689,11 @@ function CellShell({
  * Inline caption inside a flagged cell — keeps the "this needs your eyes" cue
  * and the OCR's original guess together so the manager can verify in place.
  */
-function ReviewHint({
-  label,
-  modelSaid,
-}: {
-  label: string
-  modelSaid?: string | null
-}) {
+function ReviewHint({ label }: { label: string }) {
   return (
     <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
       <span className="mr-1">⚠</span>
       {label}
-      {modelSaid && (
-        <span className="ml-1 font-normal normal-case text-[color:var(--muted)]">
-          (model: <span className="font-medium text-[color:var(--foreground)]">{modelSaid}</span>)
-        </span>
-      )}
     </p>
   )
 }
@@ -1527,18 +1708,20 @@ function BatchStageView({
   items,
   onUpdate,
   onRotate,
+  onConfirmItem,
   onConfirm,
   onCancel,
 }: {
   items: BatchItem[]
   onUpdate: (id: string, patch: Partial<BatchItem>) => void
   onRotate: (id: string, rotation: 0 | 90 | 180 | 270) => void
+  onConfirmItem: (id: string) => void
   onConfirm: () => void
   onCancel: () => void
 }) {
   const [lightboxId, setLightboxId] = useState<string | null>(null)
   const lightboxItem = lightboxId ? items.find((b) => b.id === lightboxId) ?? null : null
-  const allAssigned = items.every((b) => b.date)
+  const allReady = items.every((b) => b.ocrStatus !== 'pending')
   const autoCount = items.filter((b) => b.dateSource === 'auto').length
 
   function rotateCW(r: number): 0 | 90 | 180 | 270 {
@@ -1553,59 +1736,145 @@ function BatchStageView({
       {/* Full-screen lightbox */}
       {lightboxItem && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+          className="fixed inset-0 z-50 flex flex-col bg-black/95"
           onClick={() => setLightboxId(null)}
         >
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={() => setLightboxId(null)}
-            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/25"
-          >
-            ✕
-          </button>
-          {/* Rotate buttons inside lightbox */}
-          <div
-            className="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-3"
-            onClick={(e) => e.stopPropagation()}
-          >
+          {/* Top bar: close */}
+          <div className="flex shrink-0 items-center justify-between px-4 pt-3 pb-2">
+            <span className="text-sm font-medium text-white/70">
+              {lightboxItem.ocrStatus === 'pending' ? 'Set date & shift, then confirm' : 'Full view'}
+            </span>
             <button
               type="button"
-              onClick={() => onRotate(lightboxItem.id, rotateCCW(lightboxItem.rotation))}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg text-white hover:bg-white/30"
-              title="Rotate left"
-            >↺</button>
-            <button
-              type="button"
-              onClick={() => onRotate(lightboxItem.id, rotateCW(lightboxItem.rotation))}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg text-white hover:bg-white/30"
-              title="Rotate right"
-            >↻</button>
+              aria-label="Close"
+              onClick={() => setLightboxId(null)}
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/25"
+            >
+              ✕
+            </button>
           </div>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={lightboxItem.previewUrl}
-            alt="Sheet"
-            style={{
-              transform: `rotate(${lightboxItem.rotation}deg)`,
-              transition: 'transform 0.2s ease',
-              maxHeight: lightboxItem.rotation === 0 || lightboxItem.rotation === 180 ? '85vh' : '85vw',
-              maxWidth: lightboxItem.rotation === 0 || lightboxItem.rotation === 180 ? '90vw' : '85vh',
-            }}
-            className="rounded object-contain"
+
+          {/* Image */}
+          <div className="flex flex-1 items-center justify-center overflow-hidden px-4">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={lightboxItem.previewUrl}
+              alt="Sheet"
+              style={{
+                transform: `rotate(${lightboxItem.rotation}deg)`,
+                transition: 'transform 0.2s ease',
+                maxHeight: lightboxItem.rotation === 0 || lightboxItem.rotation === 180 ? '65vh' : '65vw',
+                maxWidth: lightboxItem.rotation === 0 || lightboxItem.rotation === 180 ? '90vw' : '65vh',
+              }}
+              className="rounded object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+
+          {/* Bottom controls panel */}
+          <div
+            className="shrink-0 space-y-3 rounded-t-2xl bg-black/80 px-5 pb-6 pt-4 backdrop-blur-sm"
             onClick={(e) => e.stopPropagation()}
-          />
+          >
+            {/* Rotate row */}
+            <div className="flex items-center justify-center gap-4">
+              <button
+                type="button"
+                onClick={() => onRotate(lightboxItem.id, rotateCCW(lightboxItem.rotation))}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg text-white hover:bg-white/30"
+                title="Rotate left"
+              >↺</button>
+              <span className="text-xs text-white/50">
+                {lightboxItem.rotation !== 0 ? `${lightboxItem.rotation}° rotated` : 'Rotate if needed'}
+              </span>
+              <button
+                type="button"
+                onClick={() => onRotate(lightboxItem.id, rotateCW(lightboxItem.rotation))}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-lg text-white hover:bg-white/30"
+                title="Rotate right"
+              >↻</button>
+            </div>
+
+            {/* Date + shift row */}
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="block flex-1 min-w-[140px]">
+                <span className="mb-1 block text-xs font-medium text-white/60">Date</span>
+                <input
+                  type="date"
+                  value={lightboxItem.date}
+                  onChange={(e) =>
+                    onUpdate(lightboxItem.id, { date: e.target.value, dateSource: 'manual' })
+                  }
+                  className="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder-white/40 focus:border-white/50 focus:outline-none"
+                />
+              </label>
+              <div>
+                <p className="mb-1 text-xs font-medium text-white/60">Shift</p>
+                <div className="flex gap-2">
+                  {(['lunch', 'dinner'] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => onUpdate(lightboxItem.id, { shiftType: s })}
+                      className={
+                        lightboxItem.shiftType === s
+                          ? 'rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black'
+                          : 'rounded-full border border-white/30 px-4 py-1.5 text-xs text-white/70 hover:border-white/60'
+                      }
+                    >
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Confirm / close */}
+            <div className="flex gap-3 pt-1">
+              {lightboxItem.ocrStatus === 'pending' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onConfirmItem(lightboxItem.id)
+                    setLightboxId(null)
+                  }}
+                  className="flex-1 rounded-full bg-white py-2.5 text-sm font-semibold text-black hover:bg-white/90"
+                >
+                  Confirm — start scanning
+                </button>
+              ) : (
+                <div className="flex flex-1 items-center justify-center gap-2 py-2 text-sm text-white/60">
+                  {lightboxItem.ocrStatus === 'processing' && (
+                    <><span className="h-2 w-2 animate-pulse rounded-full bg-white/60" /> Scanning…</>
+                  )}
+                  {lightboxItem.ocrStatus === 'done' && (
+                    <><span className="text-green-400">✓</span> Scan complete</>
+                  )}
+                  {lightboxItem.ocrStatus === 'error' && (
+                    <><span className="text-rose-400">✗</span> Scan failed — {lightboxItem.ocrError}</>
+                  )}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setLightboxId(null)}
+                className="rounded-full border border-white/20 px-5 py-2.5 text-sm text-white/70 hover:border-white/40"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
       <div className="mx-auto max-w-lg space-y-4">
         <div>
           <p className="text-sm text-[color:var(--muted)]">
-            {items.length} photo{items.length !== 1 ? 's' : ''} selected — scanning in background. Verify the date and shift for each, then tap <strong>Scan</strong> to confirm.
+            {items.length} photo{items.length !== 1 ? 's' : ''} selected. Open each photo to verify the date and shift, then tap <strong>Confirm</strong> to start scanning.
           </p>
           {autoCount > 0 && (
             <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-              ⚠ {autoCount} date{autoCount !== 1 ? 's were' : ' was'} estimated from the file — open the photo to confirm.
+              ⚠ {autoCount} date{autoCount !== 1 ? 's were' : ' was'} estimated from the file — open the photo to verify.
             </p>
           )}
         </div>
@@ -1641,6 +1910,9 @@ function BatchStageView({
                   </span>
                   {/* OCR status badge on thumbnail */}
                   <span className="absolute left-0 top-0 m-0.5">
+                    {item.ocrStatus === 'pending' && (
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[8px] text-white" title="Not yet confirmed">!</span>
+                    )}
                     {item.ocrStatus === 'processing' && (
                       <span className="flex h-4 w-4 items-center justify-center rounded-full bg-black/60">
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
@@ -1717,6 +1989,23 @@ function BatchStageView({
                     </button>
                   </div>
                 </div>
+
+                {/* Per-card confirm / status */}
+                {item.ocrStatus === 'pending' ? (
+                  <button
+                    type="button"
+                    onClick={() => onConfirmItem(item.id)}
+                    className="btn-primary w-full py-1.5 text-xs"
+                  >
+                    Confirm
+                  </button>
+                ) : (
+                  <p className="text-[10px] text-[color:var(--muted)]">
+                    {item.ocrStatus === 'processing' && '⏳ Scanning…'}
+                    {item.ocrStatus === 'done' && '✓ Ready'}
+                    {item.ocrStatus === 'error' && `✗ Error — tap photo to retry`}
+                  </p>
+                )}
               </div>
             </div>
           ))}
@@ -1725,15 +2014,20 @@ function BatchStageView({
         <div className="flex gap-3">
           <button
             onClick={onConfirm}
-            disabled={!allAssigned}
+            disabled={!allReady}
             className="btn-primary disabled:opacity-50"
           >
-            Scan {items.length} sheet{items.length !== 1 ? 's' : ''}
+            Review {items.length} sheet{items.length !== 1 ? 's' : ''}
           </button>
           <button onClick={onCancel} className="btn-secondary">
             Cancel
           </button>
         </div>
+        {!allReady && (
+          <p className="text-xs text-[color:var(--muted)]">
+            Confirm each photo above to enable this button.
+          </p>
+        )}
       </div>
     </>
   )
@@ -1880,7 +2174,7 @@ function extractDateFromFile(file: File): string {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
 }
 
-/** Hours worked (start → end minus break). Handles midnight crossing. Returns null if times missing. */
+/** Hours worked (start → end minus break), rounded down to the nearest 15-minute interval. Handles midnight crossing. Returns null if times missing. */
 function computeShiftHours(startTime: string, endTime: string, breakMinutes: number): number | null {
   if (!startTime || !endTime) return null
   const toMins = (t: string) => {
@@ -1890,7 +2184,8 @@ function computeShiftHours(startTime: string, endTime: string, breakMinutes: num
   let start = toMins(startTime)
   let end = toMins(endTime)
   if (end <= start) end += 24 * 60
-  return Math.max(0, end - start - breakMinutes) / 60
+  const raw = Math.max(0, end - start - breakMinutes)
+  return Math.floor(raw / 15) * 15 / 60
 }
 
 /**

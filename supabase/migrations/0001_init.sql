@@ -1,5 +1,5 @@
--- Mandarin Timesheet — initial schema
--- Run in Supabase SQL editor (or `supabase db push` once linked).
+-- Mandarin Timesheet — complete schema
+-- Run once in the Supabase SQL editor to set up a fresh database.
 
 create extension if not exists "uuid-ossp";
 
@@ -7,6 +7,7 @@ create extension if not exists "uuid-ossp";
 create table if not exists employees (
   id uuid primary key default uuid_generate_v4(),
   full_name text not null,
+  employee_number int,
   role text,
   hourly_rate numeric(6,2) not null default 17.50,
   age int,
@@ -21,6 +22,8 @@ create table if not exists employees (
 create index if not exists employees_active_idx on employees (active);
 create unique index if not exists employees_full_name_lower_uniq
   on employees (lower(full_name)) where active;
+create unique index if not exists employees_employee_number_uniq
+  on employees (employee_number) where employee_number is not null;
 
 -- Pay periods (biweekly) -----------------------------------------------------
 create table if not exists pay_periods (
@@ -39,6 +42,7 @@ create table if not exists daily_sheets (
   pay_period_id uuid references pay_periods(id) on delete set null,
   status text not null default 'draft'
     check (status in ('draft','reviewing','approved')),
+  shift_type text check (shift_type in ('lunch', 'dinner')),
   scan_image_path text,           -- supabase storage path of original photo
   notes text,
   approved_at timestamptz,
@@ -66,6 +70,7 @@ create table if not exists shifts (
   meal_provided boolean not null default false,
   initials text,
   notes text,
+  display_order int,              -- top-to-bottom order from the scanned sheet
   manual_adjustment_minutes int not null default 0, -- + or -
   manual_adjustment_reason text,
   -- review state from OCR:
@@ -78,6 +83,8 @@ create table if not exists shifts (
 
 create index if not exists shifts_sheet_idx on shifts (daily_sheet_id);
 create index if not exists shifts_employee_idx on shifts (employee_id);
+create index if not exists shifts_sheet_order_idx
+  on shifts (daily_sheet_id, display_order nulls last, start_time nulls last);
 
 -- Alcohol sales (per employee per day) --------------------------------------
 create table if not exists alcohol_sales (
