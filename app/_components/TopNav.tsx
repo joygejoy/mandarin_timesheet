@@ -17,7 +17,7 @@ const NAV = [
 export function TopNav() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
-  const hidden = pathname?.startsWith('/login') ?? false
+  const hidden = (pathname?.startsWith('/login') || pathname?.startsWith('/landing')) ?? false
 
   useEffect(() => { setOpen(false) }, [pathname])
 
