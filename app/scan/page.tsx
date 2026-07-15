@@ -1,5 +1,6 @@
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { isOpenAIConfigured } from '@/lib/openai'
+import { getSession } from '@/lib/auth'
 import { SetupRequired } from '@/app/_components/SetupRequired'
 import { PageHero } from '@/app/_components/PageHero'
 import { ScanClient } from './ScanClient'
@@ -16,6 +17,12 @@ export default async function ScanPage() {
     )
   }
 
+  const session = await getSession()
+  // Non-admin users are hard-locked to their own department here — no peek
+  // toggle, unlike Dashboard/Shifts/Payroll (see lib/permissions.ts).
+  const lockedDepartment =
+    session && session.department !== 'all' ? session.department : null
+
   const supabase = getSupabaseAdmin()
   const { data } = await supabase
     .from('employees')
@@ -26,7 +33,7 @@ export default async function ScanPage() {
   return (
     <Shell>
       {!isOpenAIConfigured() && <OpenAINotice />}
-      <ScanClient employees={(data ?? []) as Employee[]} />
+      <ScanClient employees={(data ?? []) as Employee[]} lockedDepartment={lockedDepartment} />
     </Shell>
   )
 }

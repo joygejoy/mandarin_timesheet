@@ -3,17 +3,23 @@
 import { useState } from 'react'
 import { WageSelect } from '@/app/_components/WageSelect'
 import { DEFAULT_WAGE_RATE } from '@/lib/wages'
+import { ROLE_DEFS, type Department } from '@/lib/roles'
 import type { Employee } from '@/lib/types/db'
 
 type Props = {
   action: (formData: FormData) => void | Promise<void>
   employee?: Employee
   submitLabel: string
+  /** Non-admin users only get to pick roles in their own department. */
+  lockedDepartment?: Department | null
 }
 
-export function EmployeeForm({ action, employee, submitLabel }: Props) {
+export function EmployeeForm({ action, employee, submitLabel, lockedDepartment }: Props) {
   const e = employee
   const [rate, setRate] = useState<number>(e?.hourly_rate ?? DEFAULT_WAGE_RATE)
+  const roleOptions = lockedDepartment
+    ? ROLE_DEFS.filter((def) => def.department === lockedDepartment)
+    : ROLE_DEFS
 
   return (
     <form action={action} className="grid max-w-xl gap-4">
@@ -43,9 +49,12 @@ export function EmployeeForm({ action, employee, submitLabel }: Props) {
       <Field label="Role">
         <select name="role" defaultValue={e?.role ?? ''} className="input">
           <option value="">—</option>
-          <option value="Server">Server</option>
-          <option value="Busperson">Busperson</option>
-          {e?.role && e.role !== 'Server' && e.role !== 'Busperson' && (
+          {roleOptions.map((def) => (
+            <option key={def.value} value={def.value}>
+              {def.label}
+            </option>
+          ))}
+          {e?.role && !ROLE_DEFS.some((def) => def.value === e.role) && (
             <option value={e.role}>{e.role}</option>
           )}
         </select>

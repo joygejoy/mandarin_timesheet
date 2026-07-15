@@ -26,10 +26,19 @@ export function shiftGrossMinutes(shift: Pick<Shift, 'start_time' | 'end_time'>)
   return diff
 }
 
-/** Paid minutes after subtracting break and applying manual adjustment, rounded down to the nearest 15-minute interval. */
+/**
+ * Paid minutes after subtracting break and applying manual adjustment,
+ * rounded down to the nearest 15-minute interval. When net_minutes_override
+ * is set (hostess_bar weekly sheets, whose paper total is already
+ * break-adjusted), it replaces this whole computation — the bookkeeper's
+ * number is used as-is rather than re-derived from start/end times.
+ */
+type WithOverride<T, K extends keyof Shift> = T & Partial<Pick<Shift, K>>
+
 export function shiftPaidMinutes(
-  shift: Pick<Shift, 'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes'>
+  shift: WithOverride<Pick<Shift, 'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes'>, 'net_minutes_override'>
 ): number {
+  if (shift.net_minutes_override != null) return shift.net_minutes_override
   const gross = shiftGrossMinutes(shift)
   const after = gross - (shift.break_minutes ?? 0) + (shift.manual_adjustment_minutes ?? 0)
   const raw = Math.max(0, after)
@@ -37,7 +46,7 @@ export function shiftPaidMinutes(
 }
 
 export function shiftPaidHours(
-  shift: Pick<Shift, 'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes'>
+  shift: WithOverride<Pick<Shift, 'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes'>, 'net_minutes_override'>
 ): number {
   return shiftPaidMinutes(shift) / 60
 }
@@ -48,23 +57,34 @@ export function shiftPaidHours(
  */
 export const MEAL_DEDUCTION = 2
 
-/** Returns the meal deduction for a single shift ($0 or $MEAL_DEDUCTION). */
-export function shiftMealDeduction(shift: Pick<Shift, 'meal_provided'>): number {
+/**
+ * Returns the meal deduction for a single shift. meal_deduction_override
+ * (hostess_bar weekly sheets — the paper sheet's own MEAL DED $ total)
+ * replaces the usual $0/$MEAL_DEDUCTION boolean when set.
+ */
+export function shiftMealDeduction(shift: WithOverride<Pick<Shift, 'meal_provided'>, 'meal_deduction_override'>): number {
+  if (shift.meal_deduction_override != null) return shift.meal_deduction_override
   return shift.meal_provided ? MEAL_DEDUCTION : 0
 }
 
 /** Gross pay before the meal deduction. */
 export function shiftGrossPay(
-  shift: Pick<Shift, 'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes' | 'hourly_rate_snapshot'>
+  shift: WithOverride<
+    Pick<Shift, 'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes' | 'hourly_rate_snapshot'>,
+    'net_minutes_override'
+  >
 ): number {
   return roundCurrency(shiftPaidHours(shift) * (shift.hourly_rate_snapshot ?? 0))
 }
 
 /** Net pay after the meal deduction. Floor at $0 for tiny shifts. */
 export function shiftPay(
-  shift: Pick<
-    Shift,
-    'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes' | 'hourly_rate_snapshot' | 'meal_provided'
+  shift: WithOverride<
+    Pick<
+      Shift,
+      'start_time' | 'end_time' | 'break_minutes' | 'manual_adjustment_minutes' | 'hourly_rate_snapshot' | 'meal_provided'
+    >,
+    'net_minutes_override' | 'meal_deduction_override'
   >
 ): number {
   return roundCurrency(Math.max(0, shiftGrossPay(shift) - shiftMealDeduction(shift)))
@@ -233,6 +253,14 @@ export function summarizePayPeriod(days: DaySheetWithChildren[]): BiweeklySummar
     dateSet.add(day.sheet_date)
 
     for (const s of day.shifts) {
+      // A shift's own work_date wins when set (hostess/bar weekly sheets: one
+      // sheet row spans 7 days, so each shift knows its actual day). Falls
+      // back to the parent sheet's date for servers/bus, where it's the same
+      // thing — this keeps the by-day breakdown (calendars, CSV/PDF
+      // day-of-week columns) correct without changing any totals below.
+      const shiftDate = s.work_date ?? day.sheet_date
+      dateSet.add(shiftDate)
+
       const key = biweeklyKey(s.employee_name_snapshot)
       const minutes = shiftPaidMinutes(s)
       const gross = shiftGrossPay(s)
@@ -252,7 +280,7 @@ export function summarizePayPeriod(days: DaySheetWithChildren[]): BiweeklySummar
       if (s.meal_provided) row.meal_count += 1
       row.hourly_rate = s.hourly_rate_snapshot
 
-      const cell = (row.by_date[day.sheet_date] ??= { minutes: 0, pay: 0, alcohol_points: 0 })
+      const cell = (row.by_date[shiftDate] ??= { minutes: 0, pay: 0, alcohol_points: 0 })
       cell.minutes += minutes
       cell.pay = roundCurrency(cell.pay + net)
     }
@@ -357,4 +385,15 @@ export function daysInRange(startIso: string, endIso: string): string[] {
     cursor = addDays(cursor, 1)
   }
   return out
+}
+
+/**
+ * Which calendar dates a sheet occupies, for building a date → sheet lookup
+ * on the Dashboard/Shifts/Payroll calendars. A servers/bus sheet is just its
+ * own date. A hostess/bar sheet spans the week starting on its sheet_date —
+ * shown as 7 day-cells that all link to the same sheet.
+ */
+export function calendarDatesForSheet(sheet: { sheet_date: string; department: string }): string[] {
+  if (sheet.department !== 'hostess_bar') return [sheet.sheet_date]
+  return Array.from({ length: 7 }, (_, i) => addDays(sheet.sheet_date, i))
 }

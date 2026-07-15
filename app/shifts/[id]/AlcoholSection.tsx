@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { setAlcoholPoints } from '../actions'
+import { tracksAlcoholPoints } from '@/lib/roles'
 import type { AlcoholSale, Employee, Shift } from '@/lib/types/db'
 
 
@@ -14,11 +15,6 @@ type Row = {
   fromShift: boolean
   pending: boolean
   error: string | null
-}
-
-/** Roles that shouldn't appear in the alcohol tally (buspersons don't serve drinks). */
-function isBusperson(role: string | null | undefined): boolean {
-  return /bus/i.test(role ?? '')
 }
 
 export function AlcoholSection({
@@ -34,13 +30,13 @@ export function AlcoholSection({
   employees: Employee[]
   readOnly?: boolean
 }) {
-  const empRoleMap = useMemo(
-    () => new Map(employees.map((e) => [e.id, e.role ?? ''])),
+  const empTracksMap = useMemo(
+    () => new Map(employees.map((e) => [e.id, e.tracks_alcohol_points])),
     [employees]
   )
   const initialRows = useMemo(
-    () => buildInitialRows(shifts, alcoholSales, empRoleMap),
-    [shifts, alcoholSales, empRoleMap]
+    () => buildInitialRows(shifts, alcoholSales, empTracksMap),
+    [shifts, alcoholSales, empTracksMap]
   )
   const [rows, setRows] = useState<Row[]>(initialRows)
 
@@ -55,7 +51,7 @@ export function AlcoholSection({
     const name = prompt('Server name (not on this sheet)')?.trim()
     if (!name) return
     const employee = employees.find(
-      (e) => e.full_name.toLowerCase() === name.toLowerCase() && !isBusperson(e.role)
+      (e) => e.full_name.toLowerCase() === name.toLowerCase() && e.tracks_alcohol_points
     )
     const key = employee ? employee.id : `__name__:${name.toLowerCase()}`
     if (rows.some((r) => r.key === key)) return
@@ -211,14 +207,17 @@ function PointsRow({
 function buildInitialRows(
   shifts: Shift[],
   sales: AlcoholSale[],
-  empRoleMap: Map<string, string>
+  empTracksMap: Map<string, boolean>
 ): Row[] {
   const map = new Map<string, Row>()
 
   for (const sh of shifts) {
-    // Exclude buspersons — check live employee role first, fall back to shift snapshot.
-    const role = sh.employee_id ? empRoleMap.get(sh.employee_id) : sh.role
-    if (isBusperson(role)) continue
+    // Exclude roles that don't track alcohol points — check the live employee
+    // record first, fall back to deriving it from the shift's role snapshot.
+    const tracks = sh.employee_id
+      ? empTracksMap.get(sh.employee_id) ?? tracksAlcoholPoints(sh.role)
+      : tracksAlcoholPoints(sh.role)
+    if (!tracks) continue
 
     const key = sh.employee_id ?? `__name__:${sh.employee_name_snapshot.toLowerCase()}`
     if (!map.has(key)) {

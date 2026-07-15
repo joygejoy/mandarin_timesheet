@@ -7,6 +7,7 @@ import { bulkImportEmployees, type BulkImportResult } from './actions'
 import { normalizeEmployeeName } from '@/lib/normalize'
 import { WageSelect } from '@/app/_components/WageSelect'
 import { DEFAULT_WAGE_RATE, ONTARIO_WAGE_PRESETS } from '@/lib/wages'
+import { ROLE_DEFS } from '@/lib/roles'
 
 type Candidate = {
   id: string                    // local-only client id
@@ -175,6 +176,11 @@ export function ImportClient({ existingNames }: { existingNames: string[] }) {
               setCandidates((cs) => cs.map((c) => ({ ...c, hourly_rate: r })))
             }
           />
+          <BatchRoleControls
+            onSetAll={(role) =>
+              setCandidates((cs) => cs.map((c) => ({ ...c, role })))
+            }
+          />
           <CandidateTable rows={candidates} onChange={updateCandidate} />
           <div className="flex items-center gap-3 pt-2">
             <button onClick={onSave} className="btn-primary">
@@ -309,8 +315,14 @@ function CandidateTable({
                     onChange={(e) => onChange(c.id, { role: e.target.value })}
                   >
                     <option value="">—</option>
-                    <option value="Server">Server</option>
-                    <option value="Busperson">Busperson</option>
+                    {ROLE_DEFS.map((def) => (
+                      <option key={def.value} value={def.value}>
+                        {def.label}
+                      </option>
+                    ))}
+                    {c.role && !ROLE_DEFS.some((def) => def.value === c.role) && (
+                      <option value={c.role}>{c.role}</option>
+                    )}
                   </select>
                 </td>
                 <td className="px-3 py-2 align-top">
@@ -336,6 +348,31 @@ function CandidateTable({
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+/**
+ * Bulk-set every row's role in one click — useful when a roster file has no
+ * per-row role info (e.g. a plain "Emp # + Name" list for a single
+ * department) and the parser left role blank for every row. Mirrors
+ * BatchWageControls' pattern; individual rows (like one bartender mixed into
+ * an otherwise all-hostess list) still get corrected by hand afterward.
+ */
+function BatchRoleControls({ onSetAll }: { onSetAll: (role: string) => void }) {
+  return (
+    <div className="surface flex flex-wrap items-center gap-3 p-3 text-sm">
+      <span className="text-[color:var(--muted)]">Set every row's role to:</span>
+      {ROLE_DEFS.map((def) => (
+        <button
+          key={def.value}
+          type="button"
+          onClick={() => onSetAll(def.value)}
+          className="btn-secondary text-xs"
+        >
+          {def.label}
+        </button>
+      ))}
     </div>
   )
 }

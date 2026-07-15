@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
-import { summarizePayPeriod, daysInRange } from '@/lib/payroll'
+import { summarizePayPeriod, daysInRange, calendarDatesForSheet } from '@/lib/payroll'
+import { getSession } from '@/lib/auth'
+import { resolveDepartmentView } from '@/lib/department-view'
 import { PageHero } from '@/app/_components/PageHero'
 import { ClosePeriodForm } from './ClosePeriodForm'
 import { PushToSheetsButton } from './PushToSheetsButton'
@@ -12,7 +14,13 @@ export const dynamic = 'force-dynamic'
 
 type SheetWithChildren = DailySheet & { shifts: Shift[]; alcohol_sales: AlcoholSale[] }
 
-export default async function PayPeriodPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PayPeriodPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ view?: string }>
+}) {
   const { id } = await params
   const supabase = getSupabaseAdmin()
 
@@ -33,13 +41,22 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
     .lte('sheet_date', period.end_date)
     .order('sheet_date', { ascending: true })
 
-  const sheets = (sheetsRow ?? []) as SheetWithChildren[]
+  const allSheets = (sheetsRow ?? []) as SheetWithChildren[]
 
   // Link any sheets in the date range that aren't yet tied to this period.
-  const unlinkIds = sheets.filter((s) => s.pay_period_id !== id).map((s) => s.id)
+  // Runs against every sheet regardless of the department view below, so a
+  // department the user isn't currently viewing still gets linked correctly.
+  const unlinkIds = allSheets.filter((s) => s.pay_period_id !== id).map((s) => s.id)
   if (unlinkIds.length > 0) {
     await supabase.from('daily_sheets').update({ pay_period_id: id }).in('id', unlinkIds)
   }
+
+  const { view } = await searchParams
+  const session = await getSession()
+  const departmentView = resolveDepartmentView(session?.department ?? 'all', view)
+  const sheets =
+    departmentView === 'all' ? allSheets : allSheets.filter((s) => s.department === departmentView)
+
   const approved = sheets.filter((s) => s.status === 'approved')
   const drafts = sheets.filter((s) => s.status !== 'approved')
 
@@ -52,8 +69,8 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
   )
 
   const allDates = daysInRange(period.start_date, period.end_date)
-  const approvedDates = new Set(approved.map((s) => s.sheet_date))
-  const draftDates = new Set(drafts.map((s) => s.sheet_date))
+  const approvedDates = new Set(approved.flatMap((s) => calendarDatesForSheet(s)))
+  const draftDates = new Set(drafts.flatMap((s) => calendarDatesForSheet(s)))
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -84,14 +101,14 @@ export default async function PayPeriodPage({ params }: { params: Promise<{ id: 
         action={
           <>
             <a
-              href={`/api/payroll/${id}/csv`}
+              href={`/api/payroll/${id}/csv?view=${departmentView}`}
               className="btn-secondary"
               download={`payroll_${period.start_date}_${period.end_date}.csv`}
             >
               CSV
             </a>
             <a
-              href={`/api/payroll/${id}/pdf`}
+              href={`/api/payroll/${id}/pdf?view=${departmentView}`}
               className="btn-secondary"
               download={`payroll_${period.start_date}_${period.end_date}.pdf`}
             >
@@ -243,7 +260,9 @@ function Calendar({
   drafts: Set<string>
   sheets: SheetWithChildren[]
 }) {
-  const sheetByDate = new Map(sheets.map((s) => [s.sheet_date, s]))
+  const sheetByDate = new Map(
+    sheets.flatMap((s) => calendarDatesForSheet(s).map((d) => [d, s] as const))
+  )
   return (
     <section className="mt-10">
       <h2 className="eyebrow mb-3">Days in this period</h2>

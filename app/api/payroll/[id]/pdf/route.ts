@@ -3,6 +3,8 @@ import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { summarizePayPeriod } from '@/lib/payroll'
 import { renderPayrollPdf } from '@/lib/pdf-render'
 import { buildEnrichedRows } from '@/lib/payroll-export'
+import { getSession } from '@/lib/auth'
+import { resolveDepartmentView } from '@/lib/department-view'
 import type { PayPeriod, DailySheet, Shift, AlcoholSale } from '@/lib/types/db'
 
 // pdfkit needs Node APIs (Buffer, streams) — opt out of the Edge runtime.
@@ -13,7 +15,12 @@ type SheetWithChildren = DailySheet & { shifts: Shift[]; alcohol_sales: AlcoholS
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id]/pdf'>) {
+export async function GET(req: NextRequest, ctx: RouteContext<'/api/payroll/[id]/pdf'>) {
+  const session = await getSession()
+  if (!session || session.pending) {
+    return new Response('Unauthorized', { status: 401 })
+  }
+
   const { id } = await ctx.params
   if (!UUID_RE.test(id)) return new Response('Invalid id', { status: 400 })
   let supabase: ReturnType<typeof getSupabaseAdmin>
@@ -23,16 +30,25 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/payroll/[id
     return new Response(err instanceof Error ? err.message : 'Supabase not configured', { status: 503 })
   }
 
-  // Mirror the CSV route exactly: only approved sheets, ordered by date.
+  const rawView = req.nextUrl.searchParams.get('view') ?? undefined
+  const departmentView = resolveDepartmentView(session.department, rawView)
+
+  // Mirror the CSV route exactly: only approved sheets, ordered by date,
+  // filtered to the active department view.
+  let sheetsQuery = supabase
+    .from('daily_sheets')
+    .select('*, shifts (*), alcohol_sales (*)')
+    .eq('pay_period_id', id)
+    .eq('status', 'approved')
+    .order('sheet_date', { ascending: true })
+  if (departmentView !== 'all') {
+    sheetsQuery = sheetsQuery.eq('department', departmentView)
+  }
+
   const [{ data: periodRow, error: periodErr }, { data: sheetsRow, error: sheetsErr }] =
     await Promise.all([
       supabase.from('pay_periods').select('*').eq('id', id).maybeSingle(),
-      supabase
-        .from('daily_sheets')
-        .select('*, shifts (*), alcohol_sales (*)')
-        .eq('pay_period_id', id)
-        .eq('status', 'approved')
-        .order('sheet_date', { ascending: true }),
+      sheetsQuery,
     ])
   if (periodErr) return new Response(periodErr.message, { status: 500 })
   if (!periodRow) return new Response('Pay period not found', { status: 404 })

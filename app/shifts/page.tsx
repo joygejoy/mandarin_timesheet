@@ -2,6 +2,8 @@ import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { SetupRequired } from '@/app/_components/SetupRequired'
 import { PageHero } from '@/app/_components/PageHero'
 import { isoDate, summarizeDay } from '@/lib/payroll'
+import { getSession } from '@/lib/auth'
+import { departmentForCreate, resolveDepartmentView } from '@/lib/department-view'
 import { createDailySheet } from './actions'
 import { SheetsClient, type SheetRow } from './SheetsClient'
 import type { DailySheet, Shift } from '@/lib/types/db'
@@ -10,7 +12,11 @@ export const dynamic = 'force-dynamic'
 
 type SheetWithShifts = DailySheet & { shifts: Shift[] }
 
-export default async function ShiftsPage() {
+export default async function ShiftsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>
+}) {
   if (!isSupabaseConfigured()) {
     return (
       <div className="mx-auto max-w-4xl">
@@ -20,16 +26,26 @@ export default async function ShiftsPage() {
     )
   }
 
+  const { view } = await searchParams
+  const session = await getSession()
+  const sessionDepartment = session?.department ?? 'all'
+  const departmentView = resolveDepartmentView(sessionDepartment, view)
+
   const supabase = getSupabaseAdmin()
-  const { data, error } = await supabase
+  let query = supabase
     .from('daily_sheets')
     .select('*, shifts (*)')
     .order('sheet_date', { ascending: false })
     .limit(730)
+  if (departmentView !== 'all') {
+    query = query.eq('department', departmentView)
+  }
+  const { data, error } = await query
   if (error) throw new Error(error.message)
   const sheets = (data ?? []) as SheetWithShifts[]
   const today = isoDate(new Date())
   const todaySheetId = sheets.find((s) => s.sheet_date === today)?.id ?? null
+  const createDepartment = departmentForCreate(sessionDepartment, departmentView)
 
   // Pre-summarize on the server so the client component doesn't need the full shift rows.
   const rows: SheetRow[] = sheets.map((s) => {
@@ -47,18 +63,29 @@ export default async function ShiftsPage() {
     }
   })
 
+  // Hostess/bar's unit is a week (scanned as a whole), not a single day —
+  // "Daily" doesn't apply there. Based on what's currently being viewed, same
+  // as the nav label (TopNav.tsx).
+  const isWeekly = departmentView === 'hostess_bar'
+
   return (
     <div className="mx-auto max-w-4xl">
       <PageHero
-        eyebrow="Daily · Shifts"
-        title="Daily shifts"
-        subtitle="One sheet per calendar day. Open today below, or jump to any past date — sheets are created on first open."
+        eyebrow={isWeekly ? 'Shifts' : 'Daily · Shifts'}
+        title={isWeekly ? 'Shifts' : 'Daily shifts'}
+        subtitle={
+          isWeekly
+            ? 'One sheet per week, scanned in from the weekly timesheet — see Scan Timesheet.'
+            : 'One sheet per calendar day. Open today below, or jump to any past date — sheets are created on first open.'
+        }
       />
 
-      <OpenDayPanel today={today} todaySheetId={todaySheetId} />
+      {!isWeekly && (
+        <OpenDayPanel today={today} todaySheetId={todaySheetId} createDepartment={createDepartment} />
+      )}
 
       <section className="mt-10">
-        <h2 className="eyebrow mb-3">All daily sheets</h2>
+        <h2 className="eyebrow mb-3">All {isWeekly ? 'sheets' : 'daily sheets'}</h2>
         <SheetsClient sheets={rows} />
       </section>
     </div>
@@ -68,9 +95,11 @@ export default async function ShiftsPage() {
 function OpenDayPanel({
   today,
   todaySheetId,
+  createDepartment,
 }: {
   today: string
   todaySheetId: string | null
+  createDepartment: 'servers_bus' | 'hostess_bar'
 }) {
   return (
     <section className="surface p-5">
@@ -85,6 +114,7 @@ function OpenDayPanel({
         {/* Primary action: today, single-click */}
         <form action={createDailySheet}>
           <input type="hidden" name="sheet_date" value={today} />
+          <input type="hidden" name="department" value={createDepartment} />
           <button className="btn-primary" type="submit">
             {todaySheetId ? 'Open today →' : '+ Open today'}
           </button>
@@ -103,6 +133,7 @@ function OpenDayPanel({
               className="input"
             />
           </label>
+          <input type="hidden" name="department" value={createDepartment} />
           <button className="btn-secondary" type="submit">
             Open
           </button>

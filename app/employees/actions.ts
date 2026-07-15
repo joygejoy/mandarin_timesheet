@@ -5,6 +5,43 @@ import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { ONTARIO_WAGE_PRESETS } from '@/lib/wages'
+import { departmentForRole, tracksAlcoholPoints, type Department } from '@/lib/roles'
+import { getSession } from '@/lib/auth'
+import { canWriteDepartment } from '@/lib/permissions'
+
+/**
+ * Read access to the roster is intentionally global (everyone sees every
+ * employee) — only writes are department-scoped. Throws if the signed-in
+ * user may not write to `targetDept`.
+ */
+async function requireWriteAccess(targetDept: Department) {
+  const session = await getSession()
+  if (!session || session.pending) throw new Error('Not signed in.')
+  if (!canWriteDepartment(session.department, targetDept)) {
+    throw new Error("You don't have permission to edit this department's employees.")
+  }
+}
+
+/** Admin-only: bulk operations that touch every department at once. */
+async function requireAdmin() {
+  const session = await getSession()
+  if (!session || session.pending || session.department !== 'all') {
+    throw new Error('Only an admin account can do this.')
+  }
+}
+
+/** Looks up an existing employee's department and enforces write access to it. */
+async function requireEmployeeWriteAccess(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  id: string
+): Promise<void> {
+  const { data: emp } = await supabase
+    .from('employees')
+    .select('department')
+    .eq('id', id)
+    .maybeSingle()
+  await requireWriteAccess((emp?.department as Department | undefined) ?? 'servers_bus')
+}
 
 const EmployeeInput = z.object({
   full_name: z.string().trim().min(1, 'Name required').max(120),
@@ -34,11 +71,15 @@ function clean(v: string | number | undefined | '') {
 
 export async function createEmployee(formData: FormData) {
   const data = parse(formData)
+  const role = clean(data.role) as string | null
+  await requireWriteAccess(departmentForRole(role))
   const supabase = getSupabaseAdmin()
   const { error } = await supabase.from('employees').insert({
     full_name: data.full_name,
     employee_number: clean(data.employee_number),
-    role: clean(data.role),
+    role,
+    department: departmentForRole(role),
+    tracks_alcohol_points: tracksAlcoholPoints(role),
     hourly_rate: data.hourly_rate,
     age: clean(data.age),
     default_break_minutes: data.default_break_minutes,
@@ -53,13 +94,21 @@ export async function createEmployee(formData: FormData) {
 
 export async function updateEmployee(id: string, formData: FormData) {
   const data = parse(formData)
+  const role = clean(data.role) as string | null
   const supabase = getSupabaseAdmin()
+  // Gate on both the employee's current department and, if the role edit
+  // would move them, the destination department — a locked-in user can't
+  // pull someone in from the other department or push their own out to it.
+  await requireEmployeeWriteAccess(supabase, id)
+  await requireWriteAccess(departmentForRole(role))
   const { error } = await supabase
     .from('employees')
     .update({
       full_name: data.full_name,
       employee_number: clean(data.employee_number),
-      role: clean(data.role),
+      role,
+      department: departmentForRole(role),
+      tracks_alcohol_points: tracksAlcoholPoints(role),
       hourly_rate: data.hourly_rate,
       age: clean(data.age),
       default_break_minutes: data.default_break_minutes,
@@ -75,6 +124,7 @@ export async function updateEmployee(id: string, formData: FormData) {
 
 export async function toggleEmployeeActive(id: string, active: boolean) {
   const supabase = getSupabaseAdmin()
+  await requireEmployeeWriteAccess(supabase, id)
   const { error } = await supabase.from('employees').update({ active }).eq('id', id)
   if (error) throw new Error(error.message)
   revalidatePath('/employees')
@@ -86,6 +136,7 @@ export async function toggleEmployeeActive(id: string, active: boolean) {
  */
 export async function deleteEmployee(id: string) {
   const supabase = getSupabaseAdmin()
+  await requireEmployeeWriteAccess(supabase, id)
   const { error } = await supabase.from('employees').delete().eq('id', id)
   if (error) throw new Error(error.message)
   revalidatePath('/employees')
@@ -98,6 +149,9 @@ export async function deleteEmployee(id: string) {
 export async function deleteEmployees(ids: string[]): Promise<{ deleted: number }> {
   if (ids.length === 0) return { deleted: 0 }
   const supabase = getSupabaseAdmin()
+  const { data: rows } = await supabase.from('employees').select('department').in('id', ids)
+  const departments = new Set((rows ?? []).map((r) => r.department as Department))
+  for (const dept of departments) await requireWriteAccess(dept)
   const { error, count } = await supabase
     .from('employees')
     .delete({ count: 'exact' })
@@ -112,6 +166,7 @@ export async function deleteEmployees(ids: string[]): Promise<{ deleted: number 
  * Past shifts/alcohol sales keep their name snapshots.
  */
 export async function deleteAllEmployees(): Promise<{ deleted: number }> {
+  await requireAdmin()
   const supabase = getSupabaseAdmin()
   // Supabase requires a filter on delete by default; use a tautology.
   const { error, count } = await supabase
@@ -129,6 +184,7 @@ export async function deleteAllEmployees(): Promise<{ deleted: number }> {
  * is unaffected — this only changes the rate going forward.
  */
 export async function setAllWagesToMinimum(): Promise<{ updated: number }> {
+  await requireAdmin()
   const supabase = getSupabaseAdmin()
   const { error, count } = await supabase
     .from('employees')
@@ -152,13 +208,17 @@ export async function quickCreateEmployee(data: {
   role: string | null
   hourly_rate: number
 }) {
+  const role = data.role?.trim() || null
+  await requireWriteAccess(departmentForRole(role))
   const supabase = getSupabaseAdmin()
   const { data: emp, error } = await supabase
     .from('employees')
     .insert({
       full_name: data.full_name.trim(),
       employee_number: data.employee_number ?? null,
-      role: data.role?.trim() || null,
+      role,
+      department: departmentForRole(role),
+      tracks_alcohol_points: tracksAlcoholPoints(role),
       hourly_rate: data.hourly_rate,
       active: true,
       default_break_minutes: 0,
@@ -178,6 +238,7 @@ export async function updateEmployeeRate(id: string, hourly_rate: number) {
     throw new Error('Rate must be between 0 and 999.')
   }
   const supabase = getSupabaseAdmin()
+  await requireEmployeeWriteAccess(supabase, id)
   const { error } = await supabase
     .from('employees')
     .update({ hourly_rate })

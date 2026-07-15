@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { summarizePayPeriod } from '@/lib/payroll'
+import { getSession } from '@/lib/auth'
 import {
   GoogleSheetsNotConfiguredError,
   isGoogleSheetsConfigured,
@@ -17,6 +18,11 @@ export async function POST(
   _req: NextRequest,
   ctx: RouteContext<'/api/payroll/[id]/sheets'>
 ) {
+  const session = await getSession()
+  if (!session || session.pending) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const { id } = await ctx.params
 
   // Fail fast with a Sheets-specific message if the integration env vars

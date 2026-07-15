@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { getScanSignedUrl } from '@/lib/storage'
 import { summarizeDay } from '@/lib/payroll'
+import { getSession } from '@/lib/auth'
+import { canWriteAlcohol, canWriteDepartment } from '@/lib/permissions'
 import { addShift, setDailySheetStatus } from '../actions'
 import { ShiftRows } from './ShiftRows'
 import { AddShiftForm } from './AddShiftForm'
@@ -82,15 +84,26 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
     ? await getScanSignedUrl(sheet.scan_image_path)
     : null
 
+  const session = await getSession()
+  const sessionDepartment = session?.department ?? 'all'
+  // A locked-in user browsing here via the Shifts/Dashboard peek toggle can
+  // read this sheet but not edit it if it's not their own department.
+  const canWriteSheet = canWriteDepartment(sessionDepartment, sheet.department)
+  const canWriteAlcoholHere = canWriteAlcohol(sessionDepartment)
+
   return (
     <div className="mx-auto max-w-6xl">
       <header className="pb-6">
         <Link href="/shifts" className="text-sm text-[color:var(--muted)] hover:text-[color:var(--foreground)]">
-          ← Daily shifts
+          ← {sheet.department === 'hostess_bar' ? 'Shifts' : 'Daily shifts'}
         </Link>
         <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <ChangeDateButton sheetId={sheet.id} currentDate={sheet.sheet_date} />
+            <ChangeDateButton
+              sheetId={sheet.id}
+              currentDate={sheet.sheet_date}
+              weekly={sheet.department === 'hostess_bar'}
+            />
             <div className="mt-1 flex flex-wrap items-center gap-2">
               {sheet.shift_type && (
                 <span className="inline-flex items-center rounded-full bg-[color:var(--accent-tint)] px-2.5 py-0.5 text-xs font-medium text-[color:var(--accent)]">
@@ -117,7 +130,7 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
               )}
             </p>
           </div>
-          <SheetActions sheet={sheet} hasShifts={shifts.length > 0} />
+          {canWriteSheet && <SheetActions sheet={sheet} hasShifts={shifts.length > 0} />}
         </div>
       </header>
 
@@ -129,7 +142,7 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
         </section>
       )}
 
-      {sheet.status !== 'approved' && (
+      {sheet.status !== 'approved' && canWriteSheet && (
         <section className="mt-8">
           <h2 className="mb-3 text-sm text-[color:var(--muted)]">Add a shift</h2>
           <AddShiftForm dailySheetId={sheet.id} employees={employees} addShift={addShift} />
@@ -145,7 +158,12 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
             No shifts yet. Add one above.
           </p>
         ) : (
-          <ShiftRows shifts={shifts} sheetId={sheet.id} employees={employees} readOnly={sheet.status === 'approved'} />
+          <ShiftRows
+            shifts={shifts}
+            sheetId={sheet.id}
+            employees={employees}
+            readOnly={sheet.status === 'approved' || !canWriteSheet}
+          />
         )}
       </section>
 
@@ -154,7 +172,7 @@ export default async function DailySheetPage({ params }: { params: Promise<{ id:
         shifts={shifts}
         alcoholSales={alcoholSales}
         employees={employees}
-        readOnly={sheet.status === 'approved'}
+        readOnly={sheet.status === 'approved' || !canWriteAlcoholHere}
       />
     </div>
   )

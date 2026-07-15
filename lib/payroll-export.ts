@@ -2,16 +2,31 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { BiweeklySummary } from '@/lib/payroll'
 import type { EnrichedPayrollRow } from '@/lib/pdf-render'
+import { departmentForRole, getRoleDef, type Department } from '@/lib/roles'
+
+// Human-readable label for a department value — the CSV/PDF exports are read
+// by non-technical accounting staff, so the raw 'servers_bus' / 'hostess_bar'
+// enum value isn't an acceptable column value. Fixed labels, independent of
+// whoever currently manages each department (unlike the nav-bar toggle),
+// since a historical export shouldn't read differently after a staffing
+// change.
+const DEPARTMENT_LABEL: Record<Department, string> = {
+  servers_bus: 'Servers & Bus',
+  hostess_bar: 'Hostess & Bar',
+}
+function departmentLabel(role: string | null): string {
+  return DEPARTMENT_LABEL[departmentForRole(role)]
+}
 
 /**
- * Sort priority: servers with hours (0), servers no hours (1),
- * buspersons with hours (2), buspersons no hours (3),
- * other with hours (4), other no hours (5).
+ * Sort priority: servers/bartenders with hours (0), servers/bartenders no
+ * hours (1), busboys with hours (2), busboys no hours (3), other with
+ * hours (4), other no hours (5).
  */
 function rolePriority(role: string | null, hasHours: boolean): number {
-  const r = (role ?? '').toLowerCase()
-  if (r.includes('server')) return hasHours ? 0 : 1
-  if (r.includes('bus')) return hasHours ? 2 : 3   // busboy, busperson, busser
+  const def = getRoleDef(role)
+  if (def?.value === 'Server' || def?.value === 'Bartender') return hasHours ? 0 : 1
+  if (def?.value === 'Busboy') return hasHours ? 2 : 3
   return hasHours ? 4 : 5
 }
 
@@ -43,7 +58,7 @@ export async function buildEnrichedRows(
     return {
       ...r,
       employee_number: emp?.employee_number ?? null,
-      department: emp?.role ?? null,
+      department: departmentLabel(emp?.role ?? null),
     }
   })
 
@@ -65,14 +80,19 @@ export async function buildEnrichedRows(
         alcohol_points: 0,
         by_date: {},
         employee_number: e.employee_number ?? null,
-        department: e.role ?? null,
+        department: departmentLabel(e.role),
       })
     }
   }
 
   return enriched.sort((a, b) => {
-    const pa = rolePriority(a.department, a.total_hours > 0)
-    const pb = rolePriority(b.department, b.total_hours > 0)
+    // Priority groups tip-earners (Server, Bartender) above support roles
+    // (Busboy) regardless of department, so it's role-based, not derived
+    // from the employee's department directly.
+    const roleA = a.employee_id ? empMap.get(a.employee_id)?.role ?? null : null
+    const roleB = b.employee_id ? empMap.get(b.employee_id)?.role ?? null : null
+    const pa = rolePriority(roleA, a.total_hours > 0)
+    const pb = rolePriority(roleB, b.total_hours > 0)
     if (pa !== pb) return pa - pb
     return a.employee_name.localeCompare(b.employee_name)
   })
