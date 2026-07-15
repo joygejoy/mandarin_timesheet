@@ -1,6 +1,9 @@
 import Link from 'next/link'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
-import { summarizePayPeriod, daysInRange, isoDate } from '@/lib/payroll'
+import { summarizePayPeriod, daysInRange, isoDate, calendarDatesForSheet } from '@/lib/payroll'
+import { getSession } from '@/lib/auth'
+import { departmentDisplayNames } from '@/lib/permissions'
+import { resolveDepartmentView, type DepartmentView } from '@/lib/department-view'
 import { GettingStarted } from './_onboarding/GettingStarted'
 import { ShowWalkthroughButton } from './_onboarding/ShowWalkthroughButton'
 import { getOnboardingStatus } from './_onboarding/getOnboardingStatus'
@@ -10,7 +13,7 @@ export const dynamic = 'force-dynamic'
 
 type SheetWithChildren = DailySheet & { shifts: Shift[]; alcohol_sales: AlcoholSale[] }
 
-async function getDashboardData() {
+async function getDashboardData(departmentView: DepartmentView) {
   if (!isSupabaseConfigured()) return null
 
   const supabase = getSupabaseAdmin()
@@ -38,10 +41,14 @@ async function getDashboardData() {
     }
   }
 
-  const { data: sheetsData } = await supabase
+  let sheetsQuery = supabase
     .from('daily_sheets')
     .select('*, shifts (*), alcohol_sales (*)')
     .eq('pay_period_id', period.id)
+  if (departmentView !== 'all') {
+    sheetsQuery = sheetsQuery.eq('department', departmentView)
+  }
+  const { data: sheetsData } = await sheetsQuery
 
   const sheets = (sheetsData ?? []) as SheetWithChildren[]
   const approved = sheets.filter((s) => s.status === 'approved')
@@ -57,8 +64,8 @@ async function getDashboardData() {
 
   const today = isoDate(new Date())
   const allDates = daysInRange(period.start_date, period.end_date)
-  const approvedDates = new Set(approved.map((s) => s.sheet_date))
-  const draftDates = new Set(drafts.map((s) => s.sheet_date))
+  const approvedDates = new Set(approved.flatMap((s) => calendarDatesForSheet(s)))
+  const draftDates = new Set(drafts.flatMap((s) => calendarDatesForSheet(s)))
   const pastDays = allDates.filter((d) => d <= today)
   const daysNotFilled = pastDays.filter((d) => !approvedDates.has(d) && !draftDates.has(d)).length
 
@@ -82,10 +89,19 @@ async function getDashboardData() {
   }
 }
 
-export default async function Home() {
-  const [data, onboarding] = await Promise.all([
-    getDashboardData(),
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>
+}) {
+  const { view } = await searchParams
+  const session = await getSession()
+  const departmentView = resolveDepartmentView(session?.department ?? 'all', view)
+
+  const [data, onboarding, labels] = await Promise.all([
+    getDashboardData(departmentView),
     getOnboardingStatus(),
+    isSupabaseConfigured() ? departmentDisplayNames(getSupabaseAdmin()) : Promise.resolve(null),
   ])
   const today = isoDate(new Date())
 
@@ -94,6 +110,8 @@ export default async function Home() {
   const netPay = data?.netPay ?? 0
   const daysNotFilled = data?.daysNotFilled ?? 0
   const daysUntilPayroll = data?.daysUntilPayroll ?? 0
+  const periodEyebrow =
+    departmentView === 'all' ? 'Current period' : `${labels?.[departmentView] ?? ''}'s current period`
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -103,7 +121,7 @@ export default async function Home() {
         <div>
           {hasPeriod ? (
             <>
-              <p className="eyebrow-green mb-1.5">Current period</p>
+              <p className="eyebrow-green mb-1.5">{periodEyebrow}</p>
               <h1 className="text-3xl font-bold tracking-tight">
                 {fmtRange(data!.period!.start_date, data!.period!.end_date)}
               </h1>
@@ -203,7 +221,9 @@ function PeriodCalendar({
   sheets: SheetWithChildren[]
   today: string
 }) {
-  const sheetByDate = new Map(sheets.map((s) => [s.sheet_date, s]))
+  const sheetByDate = new Map(
+    sheets.flatMap((s) => calendarDatesForSheet(s).map((d) => [d, s] as const))
+  )
   return (
     <div>
       <div className="flex flex-wrap gap-1.5">

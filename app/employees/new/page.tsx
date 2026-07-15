@@ -1,8 +1,14 @@
 import { createEmployee } from '../actions'
 import { EmployeeForm } from '../EmployeeForm'
 import { PageHero } from '@/app/_components/PageHero'
+import { getSession } from '@/lib/auth'
 
-export default function NewEmployeePage() {
+export const dynamic = 'force-dynamic'
+
+export default async function NewEmployeePage() {
+  const session = await getSession()
+  const lockedDepartment = session && session.department !== 'all' ? session.department : null
+
   return (
     <div className="mx-auto max-w-2xl">
       <PageHero
@@ -11,7 +17,7 @@ export default function NewEmployeePage() {
         accent="green"
         backLink={{ href: '/employees', label: 'Employees' }}
       />
-      <EmployeeForm action={createEmployee} submitLabel="Create employee" />
+      <EmployeeForm action={createEmployee} submitLabel="Create employee" lockedDepartment={lockedDepartment} />
     </div>
   )
 }

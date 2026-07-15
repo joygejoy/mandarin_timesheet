@@ -13,17 +13,22 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     return { error: 'Enter both username and password.' }
   }
 
-  let ok = false
+  let user
   try {
-    ok = verifyCredentials(username, password)
+    user = await verifyCredentials(username, password)
   } catch {
     return { error: 'Server is misconfigured. Contact the admin.' }
   }
 
-  if (!ok) {
+  if (!user) {
     return { error: 'Incorrect username or password.' }
   }
 
-  await createSession(username)
+  if (user.must_set_password) {
+    await createSession(user.username, user.id, user.department, true)
+    redirect('/set-password')
+  }
+
+  await createSession(user.username, user.id, user.department, false)
   redirect('/')
 }

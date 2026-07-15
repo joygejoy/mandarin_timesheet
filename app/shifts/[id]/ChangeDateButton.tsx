@@ -3,7 +3,16 @@
 import { useState, useTransition } from 'react'
 import { updateSheetDate } from '../actions'
 
-export function ChangeDateButton({ sheetId, currentDate }: { sheetId: string; currentDate: string }) {
+export function ChangeDateButton({
+  sheetId,
+  currentDate,
+  weekly = false,
+}: {
+  sheetId: string
+  currentDate: string
+  /** Hostess/bar sheets span a week starting on currentDate — label it as such. */
+  weekly?: boolean
+}) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(currentDate)
   const [error, setError] = useState<string | null>(null)
@@ -30,13 +39,15 @@ export function ChangeDateButton({ sheetId, currentDate }: { sheetId: string; cu
   if (!editing) {
     return (
       <div className="flex items-center gap-2">
-        <h1 className="text-3xl font-semibold tracking-tight">{fmtDateLong(currentDate)}</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">
+          {weekly ? `Week of ${fmtWeekRange(currentDate)}` : fmtDateLong(currentDate)}
+        </h1>
         <button
           type="button"
           onClick={() => setEditing(true)}
           className="btn-ghost text-xs"
         >
-          Edit date
+          Edit {weekly ? 'week' : 'date'}
         </button>
       </div>
     )
@@ -81,4 +92,14 @@ function fmtDateLong(iso: string) {
     day: 'numeric',
     year: 'numeric',
   })
+}
+
+function fmtWeekRange(startIso: string) {
+  const start = new Date(startIso + 'T00:00:00')
+  const end = new Date(start)
+  end.setDate(end.getDate() + 6)
+  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
+  const startLabel = start.toLocaleDateString(undefined, opts)
+  const endLabel = end.toLocaleDateString(undefined, { ...opts, year: 'numeric' })
+  return `${startLabel} – ${endLabel}`
 }

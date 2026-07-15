@@ -13,16 +13,21 @@ import {
 } from './actions'
 import { InlineWageEditor } from './InlineWageEditor'
 import { ONTARIO_WAGE_PRESETS } from '@/lib/wages'
+import { ROLE_DEFS } from '@/lib/roles'
 import type { Employee } from '@/lib/types/db'
 
 const PAGE_SIZE = 10
 
 type SortOrder = 'name' | 'num-asc' | 'num-desc'
 
+// Employees list is intentionally NOT filtered by the department view toggle
+// (TopNav) — it always shows the full roster across every department. This
+// role filter is a separate, independent control.
 export function EmployeesClient({ employees }: { employees: Employee[] }) {
   const router = useRouter()
   const [query, setQuery] = useState('')
   const [sortOrder, setSortOrder] = useState<SortOrder>('name')
+  const [roleFilter, setRoleFilter] = useState('')
   const [page, setPage] = useState(1)
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -32,13 +37,14 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return employees.filter((e) => {
+      if (roleFilter && e.role !== roleFilter) return false
       if (!q) return true
       if (e.full_name.toLowerCase().includes(q)) return true
       if ((e.role ?? '').toLowerCase().includes(q)) return true
       if (e.employee_number != null && String(e.employee_number).includes(q)) return true
       return false
     })
-  }, [employees, query])
+  }, [employees, query, roleFilter])
 
   const sorted = useMemo(() => {
     const arr = [...filtered]
@@ -68,7 +74,7 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
   // Reset to page 1 whenever any filter/sort changes, and clamp if a delete shrank the list.
   useEffect(() => {
     setPage(1)
-  }, [query, sortOrder])
+  }, [query, sortOrder, roleFilter])
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
   }, [page, totalPages])
@@ -193,6 +199,8 @@ export function EmployeesClient({ employees }: { employees: Employee[] }) {
         setQuery={setQuery}
         sortOrder={sortOrder}
         setSortOrder={setSortOrder}
+        roleFilter={roleFilter}
+        setRoleFilter={setRoleFilter}
         selectMode={selectMode}
         setSelectMode={setSelectMode}
         selectedCount={selected.size}
@@ -250,6 +258,8 @@ function Toolbar({
   setQuery,
   sortOrder,
   setSortOrder,
+  roleFilter,
+  setRoleFilter,
   selectMode,
   setSelectMode,
   selectedCount,
@@ -267,6 +277,8 @@ function Toolbar({
   setQuery: (s: string) => void
   sortOrder: SortOrder
   setSortOrder: (s: SortOrder) => void
+  roleFilter: string
+  setRoleFilter: (s: string) => void
   selectMode: boolean
   setSelectMode: (v: boolean) => void
   selectedCount: number
@@ -303,6 +315,20 @@ function Toolbar({
         <option value="name">Name A–Z</option>
         <option value="num-asc">Emp # Low → High</option>
         <option value="num-desc">Emp # High → Low</option>
+      </select>
+
+      <select
+        value={roleFilter}
+        onChange={(e) => setRoleFilter(e.target.value)}
+        className="input w-auto text-sm"
+        aria-label="Filter by role"
+      >
+        <option value="">All Roles</option>
+        {ROLE_DEFS.map((def) => (
+          <option key={def.value} value={def.value}>
+            {def.label}
+          </option>
+        ))}
       </select>
 
       <div className="ml-auto flex items-center gap-2">

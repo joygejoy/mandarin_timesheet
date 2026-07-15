@@ -4,6 +4,8 @@ import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { SetupRequired } from '@/app/_components/SetupRequired'
 import { PageHero } from '@/app/_components/PageHero'
 import { summarizePayPeriod, addDays, isoDate, daysInRange } from '@/lib/payroll'
+import { getSession } from '@/lib/auth'
+import { resolveDepartmentView } from '@/lib/department-view'
 import type { Shift, AlcoholSale } from '@/lib/types/db'
 
 export const dynamic = 'force-dynamic'
@@ -34,8 +36,10 @@ type DayRow = {
 
 export default async function WeekPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ isoDate: string }>
+  searchParams: Promise<{ view?: string }>
 }) {
   const { isoDate: rawDate } = await params
   const monday = getMondayOfWeek(rawDate)
@@ -53,13 +57,21 @@ export default async function WeekPage({
     )
   }
 
+  const { view } = await searchParams
+  const session = await getSession()
+  const departmentView = resolveDepartmentView(session?.department ?? 'all', view)
+
   const supabase = getSupabaseAdmin()
-  const { data, error } = await supabase
+  let query = supabase
     .from('daily_sheets')
     .select('id, sheet_date, status, shifts(*), alcohol_sales(*)')
     .gte('sheet_date', monday)
     .lte('sheet_date', sunday)
     .order('sheet_date')
+  if (departmentView !== 'all') {
+    query = query.eq('department', departmentView)
+  }
+  const { data, error } = await query
   if (error) throw new Error(error.message)
 
   const sheets = (data ?? []) as DayRow[]

@@ -3,11 +3,19 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { approveScannedSheet, type ApproveInputType } from './actions'
+import { approveScannedSheet, approveScannedGrid, type ApproveInputType, type ApproveGridInputType } from './actions'
 import { quickCreateEmployee } from '@/app/employees/actions'
 import { EmployeeCombobox } from '@/app/_components/EmployeeCombobox'
 import { DEFAULT_WAGE_RATE } from '@/lib/wages'
+import { tracksAlcoholPoints, type Department } from '@/lib/roles'
+import { flattenGridRows, type FlatGridShift } from '@/lib/grid-shifts'
+import type { ExtractedGridSheet } from '@/lib/openai'
 import type { Employee } from '@/lib/types/db'
+
+const DEPARTMENT_LABEL: Record<Department, string> = {
+  servers_bus: 'Servers & Bus',
+  hostess_bar: 'Hostess & Bar',
+}
 
 type Candidate = {
   id: string
@@ -82,6 +90,7 @@ type ApiResponse = {
       inferred_from_bracket: boolean
     }[]
   }
+  grid?: ExtractedGridSheet
   scan_image_path?: string | null
   error?: string
 }
@@ -94,11 +103,18 @@ const SCAN_MESSAGES = [
   'Almost done…',
 ]
 
-export function ScanClient({ employees }: { employees: Employee[] }) {
+export function ScanClient({
+  employees,
+  lockedDepartment,
+}: {
+  employees: Employee[]
+  /** Non-admin users are hard-locked to their own department — no picker. */
+  lockedDepartment: Department | null
+}) {
   const router = useRouter()
   const fileInput = useRef<HTMLInputElement>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [step, setStep] = useState<'pick' | 'preview' | 'batch-stage' | 'extracting' | 'review' | 'saving' | 'done'>('pick')
+  const [step, setStep] = useState<'pick' | 'preview' | 'batch-stage' | 'extracting' | 'review' | 'grid-review' | 'saving' | 'done'>('pick')
   const [error, setError] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [meta, setMeta] = useState<SheetMeta | null>(null)
@@ -117,6 +133,15 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
   const [scanRotation, setScanRotation] = useState<0 | 90 | 180 | 270>(0)
   // Single-sheet shift type hint (let user pre-select before scanning)
   const [shiftTypeHint, setShiftTypeHint] = useState<'lunch' | 'dinner' | null>(null)
+  // Which department this sheet belongs to — daily_sheets is now keyed by
+  // (sheet_date, department), so front-staff (hostess) sheets don't collide
+  // with the FOH service sheet for the same date.
+  const [department, setDepartment] = useState<Department>(lockedDepartment ?? 'servers_bus')
+  // Weekly grid state (hostess_bar only) — a completely different review flow
+  // from the single-day Candidate table above.
+  const [gridSheet, setGridSheet] = useState<ExtractedGridSheet | null>(null)
+  const [gridRows, setGridRows] = useState<FlatGridShift[]>([])
+  const [weekStartDate, setWeekStartDate] = useState('')
   // Batch state
   const [batchItems, setBatchItems] = useState<BatchItem[]>([])
   const [batchQueue, setBatchQueue] = useState<BatchItem[]>([])
@@ -157,12 +182,13 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setScanRotation(0)
 
     let json: ApiResponse
-    if (preloadedResult?.sheet) {
+    if (preloadedResult?.sheet || preloadedResult?.grid) {
       // Already fetched in the background — skip the network wait entirely.
       json = preloadedResult
     } else {
       const fd = new FormData()
       fd.append('file', uploadBlob, file.name.replace(/\.[^.]+$/, '.jpg'))
+      fd.append('department', department)
       let res: Response
       try {
         res = await fetch('/api/shifts/extract', { method: 'POST', body: fd })
@@ -172,11 +198,25 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         return
       }
       json = (await res.json().catch(() => ({}))) as ApiResponse
-      if (!res.ok || !json.sheet) {
+      if (!res.ok || (!json.sheet && !json.grid)) {
         setError(json.error ?? `HTTP ${res.status}`)
         setStep('pick')
         return
       }
+    }
+
+    if (department === 'hostess_bar') {
+      const grid = json.grid!
+      setRawOcr(grid)
+      setScanImagePath(json.scan_image_path ?? null)
+      const flat = flattenGridRows(grid).map((r) => {
+        const employee = resolveEmployee(r.employee_name)
+        return employee ? { ...r, employee_id: employee.id, employee_name: employee.full_name } : r
+      })
+      setGridSheet(grid)
+      setGridRows(flat)
+      setStep('grid-review')
+      return
     }
 
     const sheet = json.sheet!
@@ -288,6 +328,20 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         ocrError: null,
       }
     })
+    // Hostess/bar photos don't need per-photo date/shift staging — a grid
+    // photo has no lunch/dinner ambiguity to resolve upfront (dates come from
+    // the sheet itself, confirmed in the grid-review step). Skip straight to
+    // processing the first file; the rest ride the same batchQueue/
+    // continueToNext mechanism the single-day flow already uses.
+    if (department === 'hostess_bar') {
+      setBatchItems(items)
+      setBatchQueue(items.slice(1))
+      setBatchTotal(items.length)
+      setBatchSaved(0)
+      onFileChosen(items[0].file, undefined, undefined, undefined, 0)
+      return
+    }
+
     setBatchItems(items)
     setStep('batch-stage')
     // OCR does NOT start automatically — the user must confirm date/shift
@@ -415,7 +469,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     }
 
     const alcoholPoints = candidates
-      .filter((c) => c.include && c.employee_name.trim() && c.drink_points > 0 && !isBusperson(c.role))
+      .filter((c) => c.include && c.employee_name.trim() && c.drink_points > 0 && tracksAlcoholPoints(c.role))
       .map((c) => ({
         employee_id: c.employee_id,
         employee_name: c.employee_name.trim(),
@@ -428,6 +482,7 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         const st = meta?.shift_type
         const payload: ApproveInputType = {
           sheet_date: sheetDate,
+          department,
           approved_by: approvedBy.trim() || null,
           rows,
           raw_ocr: rawOcr,
@@ -443,6 +498,60 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Save failed')
         setStep('review')
+      }
+    })
+  }
+
+  function patchGridRow(key: string, patch: Partial<FlatGridShift>) {
+    setGridRows((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)))
+  }
+
+  async function onApproveGrid() {
+    setError(null)
+    if (!weekStartDate) {
+      setError('Pick the week-starting date first.')
+      return
+    }
+    const rows = gridRows.filter((r) => r.include)
+    if (rows.length === 0) {
+      setError('No employees selected to save.')
+      return
+    }
+    const unmatchedNames = rows.filter((r) => !r.employee_id).map((r) => r.employee_name)
+    if (unmatchedNames.length > 0) {
+      setError(
+        `Cannot save: ${Array.from(new Set(unmatchedNames)).join(', ')} not in the employee roster. Reassign those rows to a roster employee, or deselect them.`
+      )
+      return
+    }
+
+    setStep('saving')
+    startTransition(async () => {
+      try {
+        const payload: ApproveGridInputType = {
+          week_start_date: weekStartDate,
+          department: 'hostess_bar',
+          rows: rows.map((r) => {
+            const emp = r.employee_id ? allEmployees.find((e) => e.id === r.employee_id) : undefined
+            return {
+              employee_id: r.employee_id,
+              employee_name: r.employee_name,
+              hourly_rate: emp?.hourly_rate ?? DEFAULT_WAGE_RATE,
+              net_hours: r.net_hours,
+              meal_deduction: r.meal_deduction,
+            }
+          }),
+          raw_ocr: gridSheet,
+          scan_image_path: scanImagePath,
+        }
+        const result = await approveScannedGrid(payload)
+        setSavedSheetId(result.daily_sheet_id)
+        setBatchSaved((n) => n + 1)
+        setStep('done')
+        router.refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Save failed')
+        setStep('grid-review')
       }
     })
   }
@@ -482,8 +591,12 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     setBatchSaved(0)
     setBatchTotal(0)
     setShiftTypeHint(null)
+    setDepartment(lockedDepartment ?? 'servers_bus')
     setPendingFile(null)
     setSingleRotation(0)
+    setGridSheet(null)
+    setGridRows([])
+    setWeekStartDate('')
     if (fileInput.current) fileInput.current.value = ''
   }
 
@@ -512,12 +625,18 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         </div>
         <div>
           <p className="text-xl font-semibold">
-            {isBatch && allDone ? `All ${batchTotal} sheets saved!` : 'Sheet saved!'}
+            {isBatch
+              ? allDone
+                ? `All ${batchTotal} ${department === 'hostess_bar' ? 'weeks' : 'sheets'} saved!`
+                : ''
+              : department === 'hostess_bar'
+                ? 'Week saved!'
+                : 'Sheet saved!'}
           </p>
           <p className="mt-1 text-sm text-[color:var(--muted)]">
             {isBatch
               ? `${batchSaved} of ${batchTotal} done`
-              : `${candidates.filter((c) => c.include).length} shifts · sheet is in `}
+              : `${(department === 'hostess_bar' ? gridRows : candidates).filter((r) => r.include).length} shifts · sheet is in `}
             {!isBatch && (
               <strong className="text-[color:var(--foreground)]">review</strong>
             )}
@@ -650,37 +769,64 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
         {step === 'pick' ? (
           <>
             <div className="surface space-y-3 p-4">
-              <label className="block text-sm">
-                <span className="mb-1 block text-xs font-medium text-[color:var(--muted)]">
-                  Sheet date <span className="text-rose-500">*</span>
-                </span>
-                <input
-                  type="date"
-                  required
-                  value={manualDate}
-                  onChange={(e) => setManualDate(e.target.value)}
-                  className="input"
-                  aria-label="Date of the timesheet"
-                />
-              </label>
-              <div>
-                <p className="mb-1 text-xs font-medium text-[color:var(--muted)]">Shift type</p>
-                <div className="flex gap-2">
-                  {(['lunch', 'dinner'] as const).map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setShiftTypeHint((prev) => prev === s ? null : s)}
-                      className={shiftTypeHint === s ? 'btn-primary px-3 py-1.5 text-xs' : 'btn-secondary px-3 py-1.5 text-xs'}
-                    >
-                      {s.charAt(0).toUpperCase() + s.slice(1)}
-                    </button>
-                  ))}
-                  <span className="self-center text-[10px] text-[color:var(--muted)]">
-                    {shiftTypeHint ? `(${shiftTypeHint} defaults applied)` : '(auto-detect)'}
+              {department !== 'hostess_bar' && (
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs font-medium text-[color:var(--muted)]">
+                    Sheet date <span className="text-rose-500">*</span>
                   </span>
-                </div>
+                  <input
+                    type="date"
+                    required
+                    value={manualDate}
+                    onChange={(e) => setManualDate(e.target.value)}
+                    className="input"
+                    aria-label="Date of the timesheet"
+                  />
+                </label>
+              )}
+              <div>
+                <p className="mb-1 text-xs font-medium text-[color:var(--muted)]">Department</p>
+                {lockedDepartment ? (
+                  <p className="text-sm font-medium">{DEPARTMENT_LABEL[lockedDepartment]}</p>
+                ) : (
+                  <div className="flex gap-2">
+                    {(['servers_bus', 'hostess_bar'] as const).map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setDepartment(d)}
+                        className={department === d ? 'btn-primary px-3 py-1.5 text-xs' : 'btn-secondary px-3 py-1.5 text-xs'}
+                      >
+                        {DEPARTMENT_LABEL[d]}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
+              {department === 'hostess_bar' ? (
+                <p className="text-xs text-[color:var(--muted)]">
+                  Upload the weekly grid sheet — every date and shift comes from the sheet itself; you&rsquo;ll confirm the week and month/year on the next screen.
+                </p>
+              ) : (
+                <div>
+                  <p className="mb-1 text-xs font-medium text-[color:var(--muted)]">Shift type</p>
+                  <div className="flex gap-2">
+                    {(['lunch', 'dinner'] as const).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setShiftTypeHint((prev) => prev === s ? null : s)}
+                        className={shiftTypeHint === s ? 'btn-primary px-3 py-1.5 text-xs' : 'btn-secondary px-3 py-1.5 text-xs'}
+                      >
+                        {s.charAt(0).toUpperCase() + s.slice(1)}
+                      </button>
+                    ))}
+                    <span className="self-center text-[10px] text-[color:var(--muted)]">
+                      {shiftTypeHint ? `(${shiftTypeHint} defaults applied)` : '(auto-detect)'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
             <DropZone
               fileInputRef={fileInput}
@@ -697,10 +843,12 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
           </>
         ) : (
           <>
-            <div className="surface p-4">
-              <p className="mb-1 text-xs font-medium text-[color:var(--muted)]">Sheet date</p>
-              <p className="text-sm font-semibold">{manualDate}</p>
-            </div>
+            {department !== 'hostess_bar' && (
+              <div className="surface p-4">
+                <p className="mb-1 text-xs font-medium text-[color:var(--muted)]">Sheet date</p>
+                <p className="text-sm font-semibold">{manualDate}</p>
+              </div>
+            )}
             <ExtractingView previewUrl={previewUrl} rotation={scanRotation} />
           </>
         )}
@@ -713,12 +861,35 @@ export function ScanClient({ employees }: { employees: Employee[] }) {
     )
   }
 
+  // ---- Grid review (hostess/bar weekly sheet) ------------------------------
+
+  if (step === 'grid-review') {
+    return (
+      <GridReviewView
+        previewUrl={previewUrl}
+        rotation={scanRotation}
+        rows={gridRows}
+        employees={allEmployees}
+        month={gridSheet?.month ?? null}
+        weekStartDate={weekStartDate}
+        onWeekStartDateChange={setWeekStartDate}
+        onPatchRow={patchGridRow}
+        onSave={onApproveGrid}
+        onCancel={reset}
+        saving={false}
+        error={error}
+        batchTotal={batchTotal}
+        batchSaved={batchSaved}
+      />
+    )
+  }
+
   // ---- Review -------------------------------------------------------------
 
   const selectedCount = candidates.filter((c) => c.include).length
   const flaggedCount = candidates.filter((c) => c.include && c.needs_review).length
   const unmatchedCount = candidates.filter((c) => c.include && !c.employee_id && c.employee_name.trim()).length
-  const hasServers = candidates.some((c) => !isBusperson(c.role))
+  const hasServers = candidates.some((c) => tracksAlcoholPoints(c.role))
 
   return (
     <div className="space-y-4">
@@ -1234,7 +1405,7 @@ function ShiftCard({
       )}
 
       {/* Alcohol points — servers only */}
-      {!isBusperson(c.role) && (
+      {tracksAlcoholPoints(c.role) && (
         <div>
           <p className="mb-1 text-xs text-[color:var(--muted)]">Drink points</p>
           <div className="flex items-center gap-2">
@@ -1565,7 +1736,7 @@ function Row({
       </td>
       {showPoints && (
         <td className="px-2 py-2 text-center align-top">
-          {!isBusperson(c.role) ? (
+          {tracksAlcoholPoints(c.role) ? (
             <div className="flex items-center justify-center gap-0.5">
               <button
                 type="button"
@@ -2193,10 +2364,6 @@ function computeShiftHours(startTime: string, endTime: string, breakMinutes: num
  * serverless payload limit. Caps the longest side at 2048 px, which matches
  * what OpenAI's vision API processes internally — no accuracy loss.
  */
-function isBusperson(role: string | null | undefined): boolean {
-  return /bus/i.test(role ?? '')
-}
-
 async function compressImage(file: File, maxSide = 2048, quality = 0.85, rotation = 0): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -2290,4 +2457,200 @@ function parseTime12(input: string): string | null {
   min = Math.floor(min / 15) * 15
 
   return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+}
+
+// ---- Grid review (hostess/bar weekly sheet) --------------------------------
+//
+// Much simpler than the servers/bus daily review: one row per employee,
+// carrying the week's NET HOUR / MEAL DED totals the bookkeeper already
+// computed — no per-day breakdown, no start/end times to fix up.
+
+function GridReviewView({
+  previewUrl,
+  rotation,
+  rows,
+  employees,
+  month,
+  weekStartDate,
+  onWeekStartDateChange,
+  onPatchRow,
+  onSave,
+  onCancel,
+  saving,
+  error,
+  batchTotal,
+  batchSaved,
+}: {
+  previewUrl: string | null
+  rotation: number
+  rows: FlatGridShift[]
+  employees: Employee[]
+  month: string | null
+  weekStartDate: string
+  onWeekStartDateChange: (v: string) => void
+  onPatchRow: (key: string, patch: Partial<FlatGridShift>) => void
+  onSave: () => void
+  onCancel: () => void
+  saving: boolean
+  error: string | null
+  batchTotal: number
+  batchSaved: number
+}) {
+  // rows already comes in the sheet's own top-to-bottom order (flattenGridRows
+  // is order-preserving) — render as-is instead of alphabetizing, so the
+  // review table lines up visually with the photo.
+  const sorted = rows
+  const includedCount = rows.filter((r) => r.include).length
+
+  return (
+    <div className="space-y-4">
+      {batchTotal > 1 && (
+        <p className="text-sm text-[color:var(--muted)]">
+          Week {batchSaved + 1} of {batchTotal}
+        </p>
+      )}
+      <div className="grid gap-6 md:grid-cols-[minmax(280px,1.5fr)_3fr]">
+        <div className="md:sticky md:top-6 md:self-start">
+          <div className="surface p-2">
+            {previewUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewUrl}
+                alt="Weekly sheet"
+                className="max-h-[70vh] w-full rounded object-contain"
+                style={rotation ? { transform: `rotate(${rotation}deg)` } : undefined}
+              />
+            )}
+          </div>
+          <div className="surface mt-3 space-y-3 p-4">
+            {month && (
+              <p className="text-xs text-[color:var(--muted)]">Sheet reads: <strong className="text-[color:var(--foreground)]">{month}</strong></p>
+            )}
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs text-[color:var(--muted)]">
+                Week starting <span className="text-rose-500">*</span>
+              </span>
+              <input
+                type="date"
+                required
+                className="input w-full"
+                value={weekStartDate}
+                onChange={(e) => onWeekStartDateChange(e.target.value)}
+              />
+            </label>
+            <p className="text-xs text-[color:var(--muted)]">
+              {includedCount} of {rows.length} employees selected. One sheet gets created for the whole week — approve it the same way you&rsquo;d approve a day.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {error && (
+            <div className="rounded-md border border-rose-200 bg-rose-50/60 p-3 text-sm text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+              {error}
+            </div>
+          )}
+
+          <div className="surface overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="border-b border-[color:var(--border)] text-left text-xs font-normal text-[color:var(--muted)]">
+                <tr>
+                  <th className="w-10 px-2 py-2.5" />
+                  <th className="px-2 py-2.5 font-normal">Employee</th>
+                  <th className="px-2 py-2.5 font-normal text-right">Net hours</th>
+                  <th className="px-2 py-2.5 font-normal text-right">Meal ded. $</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[color:var(--border)]">
+                {sorted.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-3 py-6 text-center text-sm text-[color:var(--muted)]">
+                      No employees extracted. Try a clearer photo.
+                    </td>
+                  </tr>
+                ) : (
+                  sorted.map((r) => (
+                    <GridRow key={r.key} row={r} employees={employees} onPatch={(p) => onPatchRow(r.key, p)} />
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex gap-3">
+            <button onClick={onSave} className="btn-primary" disabled={saving || includedCount === 0}>
+              {saving ? 'Saving…' : `Save week (${includedCount} employee${includedCount === 1 ? '' : 's'})`}
+            </button>
+            <button onClick={onCancel} className="btn-secondary">
+              Start over
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function GridRow({
+  row,
+  employees,
+  onPatch,
+}: {
+  row: FlatGridShift
+  employees: Employee[]
+  onPatch: (p: Partial<FlatGridShift>) => void
+}) {
+  const isUnmatched = !row.employee_id
+  return (
+    <tr className={!row.include ? 'opacity-50' : isUnmatched ? 'bg-amber-50/40 dark:bg-amber-950/15' : ''}>
+      <td className="px-2 py-2 align-top">
+        <input
+          type="checkbox"
+          checked={row.include}
+          onChange={(e) => onPatch({ include: e.target.checked })}
+        />
+      </td>
+      <td className="px-2 py-2 align-top">
+        <EmployeeCombobox
+          options={employees.map((e) => ({ id: e.id, label: e.full_name, sublabel: e.role ?? undefined }))}
+          value={row.employee_id}
+          customLabel={row.employee_name}
+          onChange={(picked) => {
+            if (picked.id) {
+              const e = employees.find((x) => x.id === picked.id)
+              if (e) {
+                onPatch({ employee_id: e.id, employee_name: e.full_name })
+                return
+              }
+            }
+            onPatch({ employee_id: null, employee_name: picked.label })
+          }}
+          className="min-w-44"
+        />
+        {isUnmatched && (
+          <p className="mt-1 text-[10px] text-rose-700 dark:text-rose-400">not in roster — reassign or deselect</p>
+        )}
+      </td>
+      <td className="px-2 py-2 align-top text-right">
+        <input
+          type="number"
+          step="0.25"
+          min="0"
+          className="input w-24 text-right"
+          value={row.net_hours}
+          onChange={(e) => onPatch({ net_hours: Number(e.target.value) })}
+        />
+      </td>
+      <td className="px-2 py-2 align-top text-right">
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          className="input w-24 text-right"
+          value={row.meal_deduction}
+          onChange={(e) => onPatch({ meal_deduction: Number(e.target.value) })}
+        />
+      </td>
+    </tr>
+  )
 }

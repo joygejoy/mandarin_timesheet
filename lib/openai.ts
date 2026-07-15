@@ -648,3 +648,185 @@ function hasConsistentTimes(s: ExtractedShift): boolean {
   if (be != null && end != null && be > end) return false
   return true
 }
+
+// ---- Weekly totals extraction (hostess/bar) --------------------------------
+//
+// The hostess/bar weekly sheet is a roster-rows × day-columns grid — but
+// critically, the bookkeeper has ALREADY totaled each employee's week into a
+// "NET HOUR" and "MEAL DED" column on the same page, so we only need those
+// two numbers per employee, not a day-by-day reconstruction.
+//
+// Getting the (employee, numbers) PAIRING right turned out to be the hard
+// part, not reading the numbers themselves. Two approaches were tried and
+// empirically verified (against two real photos, cross-checked against
+// hand-transcribed ground truth) to scramble the pairing:
+//   1. One call asking for {number, name, net_hours, meal_deduction} together
+//      per row — the model reads both halves of a row correctly but binds
+//      them to the WRONG row after tracing all the way across a long grid.
+//   2. Two separate top-to-bottom passes (names-only, totals-only) zipped by
+//      list position in code — still desyncs, because the two passes don't
+//      reliably agree on which blank rows "count" as a row.
+// What DOES work reliably (per the same investigation): asking the model to
+// find a SPECIFIC NAMED employee's row in a SMALL batch is a targeted visual
+// search, not a blind top-to-bottom count — and that was reliable even for
+// the much harder day-by-day grid. So each call here names a small batch of
+// employees (from the actual roster, which already carries the sheet's
+// physical order) and asks only for THEIR rows' NET HOUR / MEAL DED —
+// batches run in parallel and results are merged, keyed by name rather than
+// by position, so a batch that misses one row doesn't shift any other batch.
+
+export type ExtractedGridRow = {
+  employee_number: number | null
+  employee_name: string
+  /** The "NET HOUR" column total for the week. 0 if blank. */
+  net_hours: number
+  /** The "MEAL DED" column total ($) for the week. 0 if blank. */
+  meal_deduction: number
+}
+
+export type ExtractedGridSheet = {
+  month: string | null // literal text, e.g. "June"
+  rows: ExtractedGridRow[]
+}
+
+const GRID_BATCH_SYSTEM = `You read a photo of a restaurant staff weekly timesheet laid out as a grid: one row per employee. Near the RIGHT edge of the page there are several summary columns per employee row, in this order: "TOT HOUR", "BRK TIME", "NET HOUR", "MEAL DED", "HOLI HRS".
+
+You will be given a short list of SPECIFIC named employees. For EACH one: find that employee's own row (using the "STAFF'S NAME" column on the left side of the page to locate it), then read ONLY that row's "NET HOUR" and "MEAL DED" values.
+
+RULES:
+- Output exactly one entry per employee named in the list below, in the same order they're listed, even if that employee's row is entirely blank on this page (output net_hours=0, meal_deduction=0 for a blank row — do not omit them).
+- "net_hours": decimal number from that row's NET HOUR column (e.g. 32.5, 7.25, 68.0). Blank, or only a slash/dash mark → 0.
+- "meal_deduction": dollar amount from that row's MEAL DED column (e.g. 4, 2.5). Blank → 0.
+- Treat each named employee's row independently — do not assume different employees share the same totals. If you find yourself outputting the exact same net_hours for two of the employees listed, stop and re-examine those specific rows; that pattern usually means you found the wrong row for one of them.
+- Before finalizing, double check: for each employee, does the row you read really have that person's name printed on the far left of it? If you're not sure you found the right physical row, look again — do not guess a number from a nearby row.
+- If a value is struck through with a correction written beside it, use the correction.
+- Ignore every other column on the page: the day-by-day grid, the "B / X" columns, "TOT HOUR", "BRK TIME", "HOLI HRS", and any employees NOT named in the list below.
+
+Output strictly the JSON schema requested — one entry per named employee, same order as the list.`
+
+const gridBatchSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['rows'],
+  properties: {
+    rows: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['employee_name', 'net_hours', 'meal_deduction'],
+        properties: {
+          employee_name: { type: 'string' },
+          net_hours: { type: 'number', minimum: 0 },
+          meal_deduction: { type: 'number', minimum: 0 },
+        },
+      },
+    },
+  },
+}
+
+const GRID_MONTH_SYSTEM = `You read a photo of a restaurant staff weekly timesheet. Find the month name, usually handwritten once near the top-left of the page (e.g. "June"). Output it as literal text, or null if you can't find it. Output strictly the JSON schema requested.`
+
+const gridMonthSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['month'],
+  properties: { month: { type: ['string', 'null'] } },
+}
+
+const GRID_BATCH_SIZE = 4
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+  return out
+}
+
+export async function extractHostessGridFromImage(args: {
+  imageBase64: string
+  mimeType: string
+  roster?: { name: string; role?: string | null }[]
+}): Promise<{ sheet: ExtractedGridSheet; raw: unknown }> {
+  const client = getOpenAI()
+  const dataUrl = `data:${args.mimeType};base64,${args.imageBase64}`
+  const roster = args.roster ?? []
+
+  const batches = roster.length > 0 ? chunk(roster, GRID_BATCH_SIZE) : []
+
+  const [monthResponse, ...batchResponses] = await Promise.all([
+    client.chat.completions.create({
+      model: 'gpt-4o',
+      temperature: 0,
+      response_format: { type: 'json_schema', json_schema: { name: 'grid_month', strict: true, schema: gridMonthSchema } },
+      messages: [
+        { role: 'system', content: GRID_MONTH_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What month is this timesheet for?' },
+            { type: 'image_url', image_url: { url: dataUrl, detail: 'low' } },
+          ],
+        },
+      ],
+    }),
+    ...batches.map((batch) => {
+      const listBlock = batch.map((e, i) => `${i + 1}. ${e.name}${e.role ? ` (${e.role})` : ''}`).join('\n')
+      return client.chat.completions.create({
+        model: 'gpt-4o',
+        temperature: 0,
+        response_format: { type: 'json_schema', json_schema: { name: 'grid_batch', strict: true, schema: gridBatchSchema } },
+        messages: [
+          { role: 'system', content: GRID_BATCH_SYSTEM },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `Find each of these employees' own row and read their NET HOUR and MEAL DED values:\n${listBlock}`,
+              },
+              { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
+            ],
+          },
+        ],
+      })
+    }),
+  ])
+
+  const monthText = monthResponse.choices[0]?.message?.content ?? '{}'
+  let month: string | null = null
+  try {
+    month = (JSON.parse(monthText) as { month: string | null }).month
+  } catch {
+    // Non-critical — leave month null rather than failing the whole extraction.
+  }
+
+  const rows: ExtractedGridRow[] = []
+  batches.forEach((batch, batchIdx) => {
+    const response = batchResponses[batchIdx]
+    const text = response.choices[0]?.message?.content ?? '{}'
+    let parsed: { rows: { employee_name: string; net_hours: number; meal_deduction: number }[] }
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      throw new Error(`OpenAI returned invalid JSON (batch ${batchIdx}): ${text.slice(0, 200)}`)
+    }
+    // Key results by the ROSTER employee, not the model's echoed name — a
+    // batch is scoped to these specific people, so this preserves the
+    // roster's own canonical spelling and employee_number regardless of how
+    // the model echoed the name back.
+    const byName = new Map(parsed.rows.map((r) => [r.employee_name.toLowerCase().trim(), r]))
+    for (const e of batch) {
+      const found =
+        byName.get(e.name.toLowerCase().trim()) ??
+        parsed.rows[batch.findIndex((b) => b.name === e.name)] // best-effort positional fallback within this small batch only
+      rows.push({
+        employee_number: null,
+        employee_name: e.name,
+        net_hours: found?.net_hours ?? 0,
+        meal_deduction: found?.meal_deduction ?? 0,
+      })
+    }
+  })
+
+  return { sheet: { month, rows }, raw: { month: monthResponse, batches: batchResponses } }
+}

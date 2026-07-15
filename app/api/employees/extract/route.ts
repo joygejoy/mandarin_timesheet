@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { extractEmployeesFromImage, isOpenAIConfigured, OpenAINotConfiguredError } from '@/lib/openai'
 import { pdfToText } from '@/lib/parsers/pdf'
 import { xlsxToRoledEmployees } from '@/lib/parsers/excel'
+import { getSession } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -17,6 +18,11 @@ type ExtractedEmployee = {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.pending) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   let formData: FormData
   try {
     formData = await request.formData()
@@ -37,7 +43,7 @@ export async function POST(request: NextRequest) {
 
   const kind = classifyFile(file)
 
-  // Excel files get role-aware parsing: first table = Server, second = Busperson.
+  // Excel files get role-aware parsing: first table = Server, second = Busboy.
   if (kind === 'excel') {
     let employees: ReturnType<typeof xlsxToRoledEmployees> = []
     try {

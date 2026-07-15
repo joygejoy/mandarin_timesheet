@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { getScanSignedUrl } from '@/lib/storage'
+import { getSession } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
@@ -13,6 +14,11 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getSession()
+  if (!session || session.pending) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const { id } = await params
   if (!id) return NextResponse.json({ error: 'Missing sheet id' }, { status: 400 })
 

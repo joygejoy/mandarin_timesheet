@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
+  extractHostessGridFromImage,
   extractShiftsFromImage,
   isOpenAIConfigured,
   OpenAINotConfiguredError,
 } from '@/lib/openai'
 import { getSupabaseAdmin, isSupabaseConfigured } from '@/lib/supabase/server'
 import { uploadScanImage } from '@/lib/storage'
+import { getSession } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 90
@@ -13,6 +15,11 @@ export const maxDuration = 90
 const MAX_BYTES = 10 * 1024 * 1024 // 10 MB
 
 export async function POST(request: NextRequest) {
+  const session = await getSession()
+  if (!session || session.pending) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   if (!isOpenAIConfigured()) {
     return NextResponse.json(
       { error: 'OPENAI_API_KEY is not set in .env.local. Add it and restart the dev server.' },
@@ -31,6 +38,11 @@ export async function POST(request: NextRequest) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'No file uploaded.' }, { status: 400 })
   }
+  // Which OCR prompt to use — same route, same auth/roster/upload plumbing,
+  // only the OpenAI call branches. Defaults to the servers/bus daily-sheet
+  // format for back-compat with any caller that omits it.
+  const rawDepartment = formData.get('department')
+  const department = rawDepartment === 'hostess_bar' ? 'hostess_bar' : 'servers_bus'
   if (!file.type.startsWith('image/')) {
     return NextResponse.json({ error: `Unsupported file type: ${file.type}.` }, { status: 400 })
   }
@@ -61,11 +73,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { sheet } = await extractShiftsFromImage({
-      imageBase64: base64,
-      mimeType: file.type,
-      roster,
-    })
+    const result =
+      department === 'hostess_bar'
+        ? { grid: (await extractHostessGridFromImage({ imageBase64: base64, mimeType: file.type, roster })).sheet }
+        : { sheet: (await extractShiftsFromImage({ imageBase64: base64, mimeType: file.type, roster })).sheet }
     let scan_image_path: string | null = null
     if (isSupabaseConfigured()) {
       try {
@@ -80,7 +91,7 @@ export async function POST(request: NextRequest) {
         console.warn('[scan/extract] image upload failed:', uploadErr)
       }
     }
-    return NextResponse.json({ sheet, scan_image_path })
+    return NextResponse.json({ ...result, scan_image_path })
   } catch (err) {
     if (err instanceof OpenAINotConfiguredError) {
       return NextResponse.json({ error: err.message }, { status: 503 })

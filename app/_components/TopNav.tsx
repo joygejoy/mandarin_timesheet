@@ -1,25 +1,85 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { LogoutButton } from './LogoutButton'
+import {
+  VIEW_PARAM,
+  isDepartmentView,
+  type DepartmentView,
+} from '@/lib/department-view'
+import type { Department } from '@/lib/roles'
+import type { UserDepartment } from '@/lib/permissions'
 
-const NAV = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/scan', label: 'Scan Timesheet' },
-  { href: '/shifts', label: 'Daily Shifts' },
-  { href: '/alcohol', label: 'Alcohol Sales' },
-  { href: '/payroll', label: 'Payroll' },
-  { href: '/employees', label: 'Employees' },
-]
+function navFor(departmentView: DepartmentView) {
+  return [
+    { href: '/', label: 'Dashboard' },
+    { href: '/scan', label: 'Scan Timesheet' },
+    // Hostess/bar's unit is a week, not a day — "Daily" doesn't apply there.
+    { href: '/shifts', label: departmentView === 'hostess_bar' ? 'Shifts' : 'Daily Shifts' },
+    { href: '/alcohol', label: 'Alcohol Sales' },
+    { href: '/payroll', label: 'Payroll' },
+    { href: '/employees', label: 'Employees' },
+  ]
+}
 
-export function TopNav() {
+// Only admin gets a department-view toggle at all — a locked-in user (Jeff,
+// Fred, or anyone else scoped to a single department) always sees their own
+// department, with no peek option.
+function optionsFor(labels: Record<Department, string>): { value: DepartmentView; label: string }[] {
+  return [
+    { value: 'servers_bus', label: labels.servers_bus },
+    { value: 'hostess_bar', label: labels.hostess_bar },
+    { value: 'all', label: 'All' },
+  ]
+}
+
+export function TopNav({
+  sessionDepartment,
+  departmentLabels,
+}: {
+  sessionDepartment: UserDepartment
+  departmentLabels: Record<Department, string>
+}) {
   const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [open, setOpen] = useState(false)
   const hidden = (pathname?.startsWith('/login') || pathname?.startsWith('/landing')) ?? false
+  // Dashboard, Shifts (incl. /shifts/week) and Payroll (incl. /payroll/[id])
+  // are the only sections with a peek toggle, and only admin gets one at all
+  // — a locked-in user (Jeff, Fred, ...) always sees their own department.
+  // /shifts/[id] is one specific sheet — its department is fixed, not a view
+  // choice. Alcohol Sales and Employees are always read-open to everyone, so
+  // no toggle either.
+  const showDepartmentView =
+    sessionDepartment === 'all' &&
+    ((pathname === '/' ||
+      pathname === '/shifts' ||
+      pathname?.startsWith('/shifts/week') ||
+      pathname?.startsWith('/payroll')) ??
+      false)
+
+  const rawView = searchParams.get(VIEW_PARAM) ?? undefined
+  // Resets to the viewer's own department (or 'all' for admin) on every fresh
+  // load/navigation — there's no param unless this toggle just set one. Only
+  // admin's view can differ from their session department.
+  const departmentView: DepartmentView =
+    sessionDepartment === 'all' && isDepartmentView(rawView) ? rawView : sessionDepartment
+  const options = optionsFor(departmentLabels)
+  const NAV = navFor(departmentView)
 
   useEffect(() => { setOpen(false) }, [pathname])
+
+  function selectDepartmentView(value: DepartmentView) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set(VIEW_PARAM, value)
+    router.push(`${pathname}?${params.toString()}`)
+    // Force a fresh server render — Next's client router cache can otherwise
+    // serve the previous searchParams' RSC payload even though the URL changed.
+    router.refresh()
+  }
 
   useEffect(() => {
     if (!open) return
@@ -34,13 +94,22 @@ export function TopNav() {
     <>
       {/* Bar: soft pink background, pink→green gradient stripe along the bottom */}
       <header className="sticky top-0 z-30" style={{ backgroundColor: 'var(--accent)' }}>
-        <div className="flex h-13 items-center px-5">
+        <div className="flex h-13 items-center gap-3 px-5">
           <Link
             href="/"
-            className="flex-1 text-[15px] font-semibold tracking-tight text-white"
+            className="text-[15px] font-semibold tracking-tight text-white"
           >
             Mandarin
           </Link>
+          {showDepartmentView && (
+            <DepartmentViewSegments
+              value={departmentView}
+              options={options}
+              onChange={selectDepartmentView}
+              className="hidden md:flex"
+            />
+          )}
+          <div className="flex-1" />
           <button
             type="button"
             aria-label={open ? 'Close menu' : 'Open menu'}
@@ -94,6 +163,19 @@ export function TopNav() {
           </button>
         </div>
 
+        {/* Department view — mobile only; desktop shows this in the header bar instead */}
+        {showDepartmentView && (
+          <div className="mb-3 border-b border-[color:var(--border)] px-2 pb-4 md:hidden">
+            <p className="mb-2 text-xs text-[color:var(--muted)]">Viewing as</p>
+            <DepartmentViewSegments
+              value={departmentView}
+              options={options}
+              onChange={selectDepartmentView}
+              full
+            />
+          </div>
+        )}
+
         {/* Nav links */}
         {NAV.map((item, i) => {
           const active =
@@ -130,6 +212,63 @@ export function TopNav() {
         </div>
       </nav>
     </>
+  )
+}
+
+/**
+ * Three-way segmented control for the department view filter. Reused for the
+ * desktop header bar (on the pink --accent background) and the mobile drawer
+ * (on the ordinary surface background) — same shape, different tint per
+ * `full` (drawer) vs. default (header) variant.
+ */
+function DepartmentViewSegments({
+  value,
+  options,
+  onChange,
+  className = '',
+  full = false,
+}: {
+  value: DepartmentView
+  options: { value: DepartmentView; label: string }[]
+  onChange: (value: DepartmentView) => void
+  className?: string
+  full?: boolean
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Department view"
+      className={
+        'inline-flex items-center gap-0.5 rounded-full p-0.5 ' +
+        (full ? 'w-full bg-[color:var(--surface-container)]' : 'bg-white/10') +
+        (className ? ' ' + className : '')
+      }
+    >
+      {options.map((opt) => {
+        const active = opt.value === value
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            aria-pressed={active}
+            className={
+              'rounded-full px-2.5 py-1 text-xs font-medium transition ' +
+              (full ? 'flex-1 text-center ' : '') +
+              (full
+                ? active
+                  ? 'bg-[color:var(--accent-tint)] text-[color:var(--accent-strong)]'
+                  : 'text-[color:var(--muted)] hover:text-[color:var(--foreground)]'
+                : active
+                ? 'bg-white text-[color:var(--accent-strong)]'
+                : 'text-white/80 hover:text-white')
+            }
+          >
+            {opt.label}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

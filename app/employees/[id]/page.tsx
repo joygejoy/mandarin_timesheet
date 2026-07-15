@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { getSession } from '@/lib/auth'
 import { PageHero } from '@/app/_components/PageHero'
 import { updateEmployee } from '../actions'
 import { EmployeeForm } from '../EmployeeForm'
@@ -24,6 +25,8 @@ export default async function EditEmployeePage({
 
   const employee = data as Employee
   const action = updateEmployee.bind(null, employee.id)
+  const session = await getSession()
+  const lockedDepartment = session && session.department !== 'all' ? session.department : null
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -33,7 +36,12 @@ export default async function EditEmployeePage({
         accent="green"
         backLink={{ href: '/employees', label: 'Employees' }}
       />
-      <EmployeeForm action={action} employee={employee} submitLabel="Save changes" />
+      <EmployeeForm
+        action={action}
+        employee={employee}
+        submitLabel="Save changes"
+        lockedDepartment={lockedDepartment}
+      />
     </div>
   )
 }
